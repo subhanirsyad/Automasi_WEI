@@ -35,8 +35,8 @@ from googleapiclient.discovery import build
 # ============== KONFIGURASI -- ISI INI ==============
 CREDENTIALS_FILE = 'credentials.json'
 TARGET_SPREADSHEET_ID = ''
-SOURCE_XLSX_PATH = r'C:\Users\Subhan\OneDrive\Documents\Automasi\SC_GMV ellips (20-26 August) (1).csv'
-SOURCE_SHEET_NAME = 'affiliate_orders_76702350440273'  # CEK & GANTI sesuai file kamu (diabaikan kalau sumbernya .csv)
+SOURCE_XLSX_PATH = r''
+SOURCE_SHEET_NAME = ''  # CEK & GANTI sesuai file kamu (diabaikan kalau sumbernya .csv)
 TARGET_SHEET_NAME = 'Raw Data SC (20 April-31 July)'  # CEK nama tab persis di file master
 ROSTER_SHEET_NAME = 'GMV Creator JULY'  # CEK -- ganti ke 'GMV Creator AUGUST' kalau sheet-nya udah ada
 
