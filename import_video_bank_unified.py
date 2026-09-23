@@ -24,11 +24,11 @@ from googleapiclient.errors import HttpError
 # ============== KONFIGURASI -- ISI INI ==============
 CREDENTIALS_FILE = 'credentials.json'
 
-TARGET_SPREADSHEET_ID = '1ZBOvn5fReBECSzgXrAS6SNuq7tWDaem9Cf_QhQN4b_8'  # Cussons
-# TARGET_SPREADSHEET_ID = '1tIG9FhUogXwBJK6YuzpT19nFlJs5EDfXA6EYQ493paE'  # Ellips
+TARGET_SPREADSHEET_ID = ''  # Cussons
+# TARGET_SPREADSHEET_ID = ''  # Ellips
 
-SOURCE_XLSX_PATH = r'C:\Users\Subhan\OneDrive\Documents\Automasi\TAP_SV Cussons (1-30 August).xlsx'
-SOURCE_SHEET_NAME = 'Custom report'
+SOURCE_XLSX_PATH = r''
+SOURCE_SHEET_NAME = ''
 
 FILTER_YEAR = 2026
 FILTER_MONTH = 8  # 8 = Agustus. Set None kalau mau semua bulan.
