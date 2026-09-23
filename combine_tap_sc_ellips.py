@@ -49,7 +49,7 @@ from googleapiclient.discovery import build
 
 # ============== KONFIGURASI ==============
 CREDENTIALS_FILE = 'credentials.json'
-SPREADSHEET_ID = '1tIG9FhUogXwBJK6YuzpT19nFlJs5EDfXA6EYQ493paE'  # Ellips X WEI - Community Performance 2026
+SPREADSHEET_ID = ''  # Ellips X WEI - Community Performance 2026
 TAP_SHEET = 'RAW TAP  (20 April-31 August)'  # PERHATIAN: 2 spasi
 SC_SHEET = 'Raw Data SC (20 April-31 August)'
 GABUNGAN_SHEET = 'RAW TAP SC'
