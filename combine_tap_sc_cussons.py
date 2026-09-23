@@ -69,7 +69,7 @@ from googleapiclient.discovery import build
 
 # ============== KONFIGURASI ==============
 CREDENTIALS_FILE = 'credentials.json'
-SPREADSHEET_ID = '1ZBOvn5fReBECSzgXrAS6SNuq7tWDaem9Cf_QhQN4b_8'  # [INT] PZ Cussons
+SPREADSHEET_ID = ''  # [INT] PZ Cussons
 TAP_SHEET = 'TAP Cussons (1-30 September)'
 SC_SHEET = 'SC Cussons (1-30 September)'
 GABUNGAN_SHEET = 'Gabungan TAP&SC2'
