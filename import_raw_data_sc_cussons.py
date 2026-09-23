@@ -28,9 +28,9 @@ from googleapiclient.discovery import build
 
 # ============== KONFIGURASI -- ISI INI ==============
 CREDENTIALS_FILE = 'credentials.json'
-TARGET_SPREADSHEET_ID = '1ZBOvn5fReBECSzgXrAS6SNuq7tWDaem9Cf_QhQN4b_8'
-SOURCE_XLSX_PATH = r'C:\Users\Subhan\OneDrive\Documents\Automasi\SC_GMV Cussons (1-16 August).csv'  # GANTI kalau nama filenya beda
-SOURCE_SHEET_NAME = 'affiliate_orders_76702350440273'  # CEK & GANTI sesuai file kamu (diabaikan kalau sumbernya .csv)
+TARGET_SPREADSHEET_ID = ''
+SOURCE_XLSX_PATH = r''  # GANTI kalau nama filenya beda
+SOURCE_SHEET_NAME = ''  # CEK & GANTI sesuai file kamu (diabaikan kalau sumbernya .csv)
 TARGET_SHEET_NAME = 'SC Cussons (1-16 August)'
 ROSTER_SHEET_NAME = "Creator Performance PZ Cussons August'26"  # buat formula Cek Creator (VLOOKUP), BUKAN filter baris
 
