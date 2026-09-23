@@ -31,8 +31,8 @@ from googleapiclient.discovery import build
 
 # ============== KONFIGURASI -- ISI INI ==============
 CREDENTIALS_FILE = 'credentials.json'
-SOURCE_XLSX_PATH = r'C:\Users\Subhan\OneDrive\Documents\Automasi\SC_GMV ellips (20-26 August) (1).csv'
-SOURCE_SHEET_NAME = 'affiliate_orders_76702350440273'  # CEK & GANTI sesuai file kamu (diabaikan kalau sumbernya .csv)
+SOURCE_XLSX_PATH = r''
+SOURCE_SHEET_NAME = ''  # CEK & GANTI sesuai file kamu (diabaikan kalau sumbernya .csv)
 
 # Filter bulan: cuma order yang Time Created-nya jatuh di bulan/tahun ini
 # yang akan dimasukin. Set FILTER_MONTH = None kalau mau semua bulan.
