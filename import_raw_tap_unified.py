@@ -34,7 +34,7 @@ from googleapiclient.errors import HttpError
 
 # ============== KONFIGURASI -- ISI INI ==============
 CREDENTIALS_FILE = 'credentials.json'
-SOURCE_XLSX_PATH = r'C:\Users\Subhan\OneDrive\Documents\Automasi\TAP_GMV Cussons (24-30 August).xlsx'
+SOURCE_XLSX_PATH = r''
 SOURCE_SHEET_NAME = 'Custom report'  # cek dulu, kadang namanya "Sheet1"
 # ======================================================
 
