@@ -28,8 +28,8 @@ from googleapiclient.discovery import build
 
 # ============== KONFIGURASI -- ISI INI ==============
 CREDENTIALS_FILE = 'credentials.json'
-TARGET_SPREADSHEET_ID = '1EzH32HH_fVFmNUYDBHhXjqooT1_z0AjesCezjsujRe4'
-SOURCE_XLSX_PATH = r'C:\Users\Subhan\OneDrive\Documents\Automasi\TAP_GMV Ellips (20-26 August).xlsx'
+TARGET_SPREADSHEET_ID = ''
+SOURCE_XLSX_PATH = r''
 SOURCE_SHEET_NAME = 'Custom report'  # cek dulu, kadang namanya "Sheet1"
 TARGET_SHEET_NAME = 'RAW TAP'
 # ======================================================
