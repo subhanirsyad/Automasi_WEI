@@ -24,7 +24,7 @@ Bagian ini ditulis selangkah demi selangkah. Anda **tidak perlu mengerti** isi p
 
 1. Buka link ini di browser:
 ```
-[python --version](https://github.com/subhanirsyad/Automasi_WEI/tree/main/Untuk%20bang%20zidane)
+https://github.com/subhanirsyad/Automasi_WEI/tree/main/Untuk%20bang%20zidane
 ```
 
 
