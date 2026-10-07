@@ -22,7 +22,7 @@ Bagian ini ditulis selangkah demi selangkah. Anda **tidak perlu mengerti** isi p
 
 ### Langkah 1. Download dari GitHub
 
-1. Buka link ini di browser: **`https://github.com/subhanirsyad/Automasi_WEI/tree/main/Untuk%20bang%20zidane`** *(pemilik repo mengganti tulisan ini dengan link yang benar)*.
+1. Buka link ini di browser: **`https://github.com/subhanirsyad/Automasi_WEI/tree/main/Untuk%20bang%20zidane`**.
 2. Klik tombol hijau **Code**, lalu klik **Download ZIP**.
 3. Buka folder **Downloads**. Klik kanan file ZIP yang baru terunduh, pilih **Extract All...**, lalu klik **Extract**.
 4. Buka folder hasil extract sampai ketemu folder bernama **"Untuk bang zidane"**. Di dalamnya ada file `app.py`, `requirements.txt`, dan lain-lain. Folder ini kita sebut **folder aplikasi**.
