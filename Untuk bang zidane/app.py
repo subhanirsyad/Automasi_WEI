@@ -60,6 +60,7 @@ class App(ctk.CTk):
 
         cfg = inti.muat_pengaturan()
         self.q, self.stop, self.running = queue.Queue(), threading.Event(), False
+        self.lanjut = threading.Event()      # tombol "Sudah login": lewati deteksi login otomatis
         self.mode_var = ctk.StringVar(value=cfg.get('mode', MODE_SHEET))
         self.link_var = ctk.StringVar(value=cfg.get('link', ''))
         self.tab_var = ctk.StringVar(value=cfg.get('tab', ''))
@@ -157,9 +158,15 @@ class App(ctk.CTk):
             font=ctk.CTkFont(family='Segoe UI', size=14, weight='bold'),
             fg_color=ACCENT, hover_color=ACCENT_HOVER, command=self._run)
         self.run_btn.grid(row=0, column=0, sticky='ew')
+        self.lanjut_btn = ctk.CTkButton(row, text='Sudah login ▶', height=46, width=130,
+                                        corner_radius=10, fg_color='transparent', border_width=1,
+                                        text_color=('#1b1d22', '#e7e9ee'), state='disabled',
+                                        border_color=('#c4c9d2', '#3a3d45'),
+                                        hover_color=('#dbe1eb', '#20232a'), command=self.lanjut.set)
+        self.lanjut_btn.grid(row=0, column=1, padx=(8, 0))
         self.stop_btn = ctk.CTkButton(row, text='Stop', height=46, width=90, corner_radius=10,
                                       fg_color=ERR, state='disabled', command=self.stop.set)
-        self.stop_btn.grid(row=0, column=1, padx=(8, 0))
+        self.stop_btn.grid(row=0, column=2, padx=(8, 0))
         self.bar = ctk.CTkProgressBar(outer)
         self.bar.set(0)
         self.bar.grid(row=5, column=0, sticky='ew', pady=(6, 0))
@@ -218,6 +225,7 @@ class App(ctk.CTk):
                     self.running = False
                     self.run_btn.configure(state='normal', text='▶   Cari Nomor WA')
                     self.stop_btn.configure(state='disabled')
+                    self.lanjut_btn.configure(state='disabled')
                     self.status.configure(text='Selesai.' if item[1] else 'Berhenti. Lihat log.',
                                           text_color=OK if item[1] else ERR)
                 else:
@@ -242,10 +250,12 @@ class App(ctk.CTk):
         self.log.delete('1.0', 'end')
         self.log.configure(state='disabled')
         self.stop.clear()
+        self.lanjut.clear()
         self.running = True
         self.bar.set(0)
         self.run_btn.configure(state='disabled', text='Sedang jalan...')
         self.stop_btn.configure(state='normal')
+        self.lanjut_btn.configure(state='normal')
         self.status.configure(text='Membaca daftar creator...', text_color=ACCENT)
         threading.Thread(target=self._work, args=(sheet, src, self.tab_var.get(), self.out_var.get().strip()),
                          daemon=True).start()
@@ -276,7 +286,7 @@ class App(ctk.CTk):
                 % max(1, round(len(names) * 2 * DELAY / 60)))
             self.q.put(('progress', 0, len(names)))
             with KalodataBrowser(PROFIL) as kal:
-                if kal.tunggu_login(log, self.stop):
+                if kal.tunggu_login(log, self.stop, lanjut=self.lanjut):
                     ok = inti.jalankan(names, kal, sink, log,
                                        lambda i, n: self.q.put(('progress', i, n)), self.stop)
         except SesiExpired as e:

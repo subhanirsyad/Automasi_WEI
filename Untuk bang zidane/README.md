@@ -22,16 +22,11 @@ Bagian ini ditulis selangkah demi selangkah. Anda **tidak perlu mengerti** isi p
 
 ### Langkah 1. Download dari GitHub
 
-1. Buka link ini di browser:
-```
-https://github.com/subhanirsyad/Automasi_WEI/tree/main/Untuk%20bang%20zidane
-```
-
-
-3. Klik tombol hijau **Code**, lalu klik **Download ZIP**.
-4. Buka folder **Downloads**. Klik kanan file ZIP yang baru terunduh, pilih **Extract All...**, lalu klik **Extract**.
-5. Buka folder hasil extract sampai ketemu folder bernama **"Untuk bang zidane"**. Di dalamnya ada file `app.py`, `requirements.txt`, dan lain-lain. Folder ini kita sebut **folder aplikasi**.
-6. *(Opsional)* Pindahkan folder aplikasi ke **Documents** supaya mudah dicari.
+1. Buka link ini di browser: **`https://github.com/NAMA-AKUN/NAMA-REPO`** *(pemilik repo mengganti tulisan ini dengan link yang benar)*.
+2. Klik tombol hijau **Code**, lalu klik **Download ZIP**.
+3. Buka folder **Downloads**. Klik kanan file ZIP yang baru terunduh, pilih **Extract All...**, lalu klik **Extract**.
+4. Buka folder hasil extract sampai ketemu folder bernama **"Untuk bang zidane"**. Di dalamnya ada file `app.py`, `requirements.txt`, dan lain-lain. Folder ini kita sebut **folder aplikasi**.
+5. *(Opsional)* Pindahkan folder aplikasi ke **Documents** supaya mudah dicari.
 
 ### Langkah 2. Taruh file `credentials.json`
 
@@ -114,7 +109,7 @@ Langkah 1, 2, 4, dan 5 tidak perlu diulang.
    Email yang sama juga tampil otomatis di aplikasi, di bawah kolom link, dengan tombol **Salin email** (klik tombol itu supaya tidak salah ketik). Di Google Sheets: klik **Share**, **tempel email**, ubah ke **Editor**, lalu **Send**. Kalau muncul pertanyaan "kirim notifikasi?", boleh dimatikan. Cukup sekali per spreadsheet.
 2. Di aplikasi, pilih **Google Spreadsheet**, lalu tempel **link** spreadsheet. Isi **nama tab** kalau daftar creator-nya bukan di tab pertama. Kalau link memuat `gid=...`, tab itu yang dipakai.
 3. Klik **Cari Nomor WA**.
-4. **Pertama kali:** jendela browser terbuka di Kalodata. Login (termasuk OTP) di jendela itu. Aplikasi mendeteksi login sendiri dan langsung lanjut. Jangan tutup jendela itu selama proses jalan. Kalau muncul kotak verifikasi "Verify you are human", klik saja.
+4. **Pertama kali:** jendela browser terbuka di Kalodata. Kotak **Log-in** terbuka otomatis (kalau tidak, klik tombol biru **Log-in / Sign-up** di pojok kanan atas jendela itu; kalau jendelanya sempit dan tombolnya terpotong, besarkan jendela dengan tombol kotak di pojok kanan atas). Isi akun Kalodata lalu selesaikan OTP. Halaman Kalodata bisa dibuka tanpa login tapi angkanya disembunyikan (`****`), jadi pastikan angkanya terbaca penuh. Aplikasi mendeteksi login sendiri dan langsung lanjut. Jangan tutup jendela itu selama proses jalan. Kalau muncul kotak verifikasi "Verify you are human", klik saja.
 5. Lihat hasilnya di tab **`Hasil WA`**. Barisnya bertambah satu per satu selama proses.
 
 Login tersimpan di folder `profil_chrome`, jadi lain kali biasanya tidak perlu login lagi.
@@ -181,7 +176,7 @@ Tiap creator butuh dua permintaan dengan jeda 1,2 detik, jadi sekitar **2,4 deti
 | `No such file or directory: 'requirements.txt'` | Terminal tidak berada di folder aplikasi. Tutup jendela hitam dan ulangi Langkah 3. |
 | `can't open file ... app.py` | Sama seperti di atas: terminal belum berada di folder aplikasi (Langkah 3). |
 | `Chrome / Edge tidak bisa dibuka` | Pasang Google Chrome, lalu jalankan lagi. |
-| Login diminta terus / proses menunggu login | Selesaikan login dan OTP di jendela browser yang terbuka. Kalau sudah login tapi aplikasi tetap menunggu, buka satu halaman creator di jendela itu, atau tutup aplikasi lalu jalankan lagi. |
+| Aplikasi terus menunggu login padahal terasa sudah login | **Cek angka di tabel jendela browser itu.** Kalau tampil **`****`** atau **`$****`**, Anda **belum login**: halaman Kalodata memang bisa dibuka tanpa login, tapi angkanya disembunyikan. Klik tombol login di pojok kanan atas jendela itu, lalu selesaikan OTP sampai angka terbaca penuh. Pastikan juga login dilakukan di **jendela yang dibuka aplikasi** (jendela terpisah dari Chrome harian Anda; cek di taskbar). Setelah login, aplikasi lanjut sendiri. Tombol **Sudah login ▶** hanya untuk kasus deteksi otomatis gagal padahal angka sudah terbaca penuh. |
 | Ada kotak "Verify you are human" | Klik di jendela browser itu. Aplikasi lanjut sendiri. |
 | `Belum login, atau ada verifikasi Cloudflare` di tengah proses | Sesi habis. Login ulang di jendela browser, lalu klik **Cari Nomor WA** lagi. Yang sudah selesai tidak diulang. |
 | `Jendela browser tidak bisa dipakai` | Jendela browser tertutup di tengah proses. Jalankan lagi dan jangan tutup jendelanya. |

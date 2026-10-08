@@ -52,7 +52,8 @@ class KalodataBrowser:
             try:
                 self._ctx = self._pw.chromium.launch_persistent_context(
                     self.profil, channel=channel, headless=False, no_viewport=True,
-                    args=['--disable-blink-features=AutomationControlled'],
+                    chromium_sandbox=True,            # tanpa ini muncul peringatan "--no-sandbox"
+                    args=['--disable-blink-features=AutomationControlled', '--start-maximized'],
                     ignore_default_args=['--enable-automation'])
                 break
             except Exception as e:                # channel nggak terpasang
@@ -61,8 +62,19 @@ class KalodataBrowser:
             self._pw.stop()
             raise RuntimeError('Chrome / Edge tidak bisa dibuka: %s' % galat)
         self.page = self._ctx.pages[0] if self._ctx.pages else self._ctx.new_page()
+        self._maksimalkan()
         self.page.goto(START, wait_until='domcontentloaded')
         return self
+
+    def _maksimalkan(self):
+        """Jendela penuh, supaya tombol login di pojok kanan atas kelihatan (--start-maximized
+        sering diabaikan kalau profil menyimpan ukuran jendela lama)."""
+        try:
+            cdp = self._ctx.new_cdp_session(self.page)
+            wid = cdp.send('Browser.getWindowForTarget')['windowId']
+            cdp.send('Browser.setWindowBounds', {'windowId': wid, 'bounds': {'windowState': 'maximized'}})
+        except Exception:
+            pass
 
     def __exit__(self, *exc):
         try:
@@ -89,27 +101,62 @@ class KalodataBrowser:
                 time.sleep(self.delay * 2 * ke)
         return None
 
-    def sudah_login(self):
-        """Dipakai berulang selama menunggu login, jadi nggak boleh melempar error."""
+    def _cek(self):
+        """(sudah_login, alasan_kalau_belum). Dipakai berulang, jadi nggak boleh melempar error."""
         try:
-            d = self._post('/creator/detail', _body_detail(PROBE_ID), percobaan=1)
-        except SesiExpired:
-            return False
-        return isinstance(d, dict) and bool(d.get('handle'))
+            if 'kalodata.com' not in self.page.url:       # fetch relatif butuh halaman Kalodata
+                self.page.goto(START, wait_until='domcontentloaded')
+            r = self.page.evaluate(_FETCH, ['/creator/detail', _body_detail(PROBE_ID)])
+            url = self.page.url
+        except Exception as e:                            # halaman lagi berpindah (habis login)
+            return False, 'halaman sedang berpindah (%s)' % type(e).__name__
+        if r['status'] in (401, 403):
+            return False, 'HTTP %d, halaman: %s' % (r['status'], url[:60])
+        if 'json' not in r['ct']:
+            return False, 'bukan JSON, kemungkinan verifikasi Cloudflare (HTTP %d)' % r['status']
+        d = json.loads(r['text'])
+        if d.get('success') and isinstance(d.get('data'), dict) and d['data']:
+            return True, ''
+        return False, 'Kalodata menjawab success=%s code=%s, halaman: %s' % (
+            d.get('success'), d.get('code'), url[:60])
 
-    def tunggu_login(self, log, stop, batas=900):
-        """Tunggu sampai pengguna selesai login di jendela browser. False kalau di-stop."""
-        mulai, info = time.time(), False
+    def sudah_login(self):
+        return self._cek()[0]
+
+    def _klik_login(self):
+        """Buka kotak login otomatis (tombol bisa terpotong di jendela sempit). Boleh gagal."""
+        try:
+            self.page.get_by_text('Log-in / Sign-up').first.click(timeout=8000)
+            self.page.get_by_text('Log-in', exact=True).first.click(timeout=5000)   # tab "Log-in"
+        except Exception:
+            pass
+
+    def tunggu_login(self, log, stop, batas=900, lanjut=None):
+        """
+        Tunggu pengguna selesai login di jendela browser. False kalau di-stop.
+        lanjut = threading.Event: kalau di-set (tombol "Sudah login"), deteksi dilewati.
+        """
+        mulai, n = time.time(), 0
         while time.time() - mulai < batas:
             if stop.is_set():
                 return False
-            if self.sudah_login():
+            if lanjut is not None and lanjut.is_set():
+                log('Dilanjutkan manual oleh pengguna.\n')
+                return True
+            ok, alasan = self._cek()
+            if ok:
                 log('Login terdeteksi, mulai memproses.\n')
                 return True
-            if not info:
-                log('Login Kalodata di jendela browser yang terbuka (termasuk OTP). '
-                    'Proses lanjut otomatis setelah login.\n')
-                info = True
+            if n == 0:
+                log('Jendela browser terbuka di Kalodata tapi BELUM LOGIN. Kotak login dibuka '
+                    'otomatis (kalau tidak muncul, klik "Log-in / Sign-up" di pojok kanan atas '
+                    'jendela itu), lalu login dan selesaikan OTP. (Tanda belum login: angka di '
+                    'tabel tampil ****.) Proses lanjut otomatis setelah login.\n')
+                self._klik_login()
+            elif n % 5 == 0:                              # tiap ~15 detik, supaya penyebabnya kelihatan
+                log('Belum terdeteksi login: %s. Kalau angka di tabel masih ****, '
+                    'login dulu di jendela browser itu.\n' % alasan)
+            n += 1
             time.sleep(3)
         raise SesiExpired('Waktu tunggu login habis (15 menit).')
 
