@@ -23,7 +23,9 @@ Bagian ini ditulis selangkah demi selangkah. Anda **tidak perlu mengerti** isi p
 ### Langkah 1. Download dari GitHub
 
 1. Buka link ini di browser:
-```https://github.com/subhanirsyad/Automasi_WEI/edit/main/Untuk%20bang%20zidane```
+```
+https://github.com/subhanirsyad/Automasi_WEI/edit/main/Untuk%20bang%20zidane
+```
 
 3. Klik tombol hijau **Code**, lalu klik **Download ZIP**.
 4. Buka folder **Downloads**. Klik kanan file ZIP yang baru terunduh, pilih **Extract All...**, lalu klik **Extract**.
