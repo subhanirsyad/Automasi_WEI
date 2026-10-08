@@ -1,24 +1,29 @@
 """
-IMPORT TAP_GMV -> RAW TAP / TAP Cussons  [UNIFIED: Ellips & Cussons]
+IMPORT TAP_GMV -> RAW TAP / TAP Cussons / RAW DATA TAP  [UNIFIED: Ellips, Cussons & NPURE]
 ================================================================================
 Satu script, brand dideteksi otomatis dari NAMA FILE SOURCE_XLSX_PATH (harus
-mengandung kata "ellips" atau "cussons", case-insensitive). Struktur kolom &
+mengandung kata "ellips", "cussons", atau "npure", case-insensitive). Struktur kolom &
 formula tujuan beda antar brand -- semuanya di-drive dari PROFILES di bawah.
 
 - ELLIPS -> tab "RAW TAP", 35 kolom + field komisi lengkap. TIDAK auto-nambah
   baris kalau kurang (baris di sheet kalau kurang harus ditambah manual dulu).
-- CUSSONS -> tab "TAP Cussons (1-30 September)", 25 kolom, formula beda
-  (GMV SL, Avg item Sold, Item Sold LS/SV/SL).
-  OTOMATIS nambah baris kalau grid-nya kurang.
+- CUSSONS -> tab "TAP Cussons (1-31 October)" dst (per bulan, lihat FILTER_MONTH),
+  25 kolom, formula beda (GMV SL, Avg item Sold, Item Sold LS/SV/SL).
+  OTOMATIS nambah baris kalau grid-nya kurang. Tab bulannya harus udah ada.
 
-FILTER GMV: keduanya cuma ambil baris yang Affiliate/Creator-attributed GMV-nya
+- NPURE -> tab "RAW DATA TAP", 21 kolom (A-U), header baris 1. Week Kamis-Rabu
+  (lihat npure_rules.py), CEK = VLOOKUP ke tab roster "Creator Performance-<Bulan>"
+  sesuai bulan baris itu (tab bulannya harus udah ada). Creator baru otomatis
+  ditambah ke roster (kolom B) kayak brand lain. Gak ada filter bulan: semua bulan masuk.
+
+FILTER GMV: semuanya cuma ambil baris yang Affiliate/Creator-attributed GMV-nya
 != 0 (laporan TAP_GMV itu cross-join, mayoritas barisnya GMV nol).
 
-DEDUP (kedua brand sama pola): kombinasi Date + Creator name + Product ID yang
+DEDUP (semua brand sama pola): kombinasi Date + Creator name + Product ID yang
 PERSIS sama dengan yang udah ada di sheet akan dilewati.
 
 CARA PAKAI:
-1. Isi SOURCE_XLSX_PATH -- nama filenya HARUS ada kata "ellips" atau "cussons".
+1. Isi SOURCE_XLSX_PATH -- nama filenya HARUS ada kata "ellips", "cussons", atau "npure".
 2. python import_raw_tap_unified.py
 """
 
@@ -26,16 +31,27 @@ import datetime
 import re
 import zipfile
 import xml.etree.ElementTree as ET
+from functools import partial
 from pathlib import Path
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+import cussons_month
+import npure_rules
+from cussons_month import week_formula
+
 # ============== KONFIGURASI -- ISI INI ==============
 CREDENTIALS_FILE = 'credentials.json'
-SOURCE_XLSX_PATH = r''
+SOURCE_XLSX_PATH = r'C:\Users\Subhan\OneDrive\Documents\Automasi\TAP_GMV Cussons (1-4 October).xlsx'
 SOURCE_SHEET_NAME = 'Custom report'  # cek dulu, kadang namanya "Sheet1"
+
+# Bulan tujuan: cuma baris di bulan/tahun ini yang dimasukin (Cussons: tab, roster &
+# rumus WEEK ikut bulan ini). FILTER_MONTH = None -> Ellips ambil semua bulan,
+# Cussons otomatis pakai bulan terbanyak di file.
+FILTER_YEAR = 2026
+FILTER_MONTH = None
 # ======================================================
 
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
@@ -85,7 +101,22 @@ def col_map_cussons():
     ]
 
 
-def write_formulas_ellips(sheet_ref, r, roster_sheet):
+def col_map_npure():
+    return [
+        ('A', ['Date']), ('C', ['Campaign ID']), ('D', ['Campaign name']),
+        ('E', ['Campaign duration']), ('F', ['Creator name']), ('H', ['Product ID']),
+        ('I', ['Product name']), ('J', ['Creator-attributed GMV', 'Affiliate GMV']),
+        ('K', ['Affiliate video-attributed GMV', 'Affiliate video GMV']),
+        ('L', ['Creator LIVE-attributed GMV', 'Affiliate LIVE GMV']),
+        ('N', ['Creator-attributed orders', 'Orders']),
+        ('O', ['Creator LIVE-attributed orders', 'LIVE orders']),
+        ('P', ['Creator video-attributed orders', 'Video orders']),
+        ('Q', ['LIVE streams']), ('R', ['Videos']), ('S', ['Revenue (Showcase)']),
+        ('T', ['Creator-attributed items sold', 'Items sold']), ('U', ['Link GMV']),
+    ]
+
+
+def write_formulas_ellips(sheet_ref, r, roster_sheet, **_):
     # Week Ellips: W1 = 1-2, W2 = 3-9, W3 = 10-16, W4 = 17-23, W5 = 24-akhir bulan
     d = f'DAY(DATEVALUE(A{r}))'
     roster_sheet_escaped = roster_sheet.replace("'", "''")
@@ -102,15 +133,10 @@ def write_formulas_ellips(sheet_ref, r, roster_sheet):
     ]
 
 
-def write_formulas_cussons(sheet_ref, r, roster_sheet):
+def write_formulas_cussons(sheet_ref, r, roster_sheet, month, **_):
     roster_sheet_escaped = roster_sheet.replace("'", "''")
     return [
-        {'range': f'{sheet_ref}B{r}', 'values': [[
-            f'=UPPER(TEXT(A{r};"MMM"))&" W"&IF(DAY(A{r})<=6;1;IF(DAY(A{r})<=13;2;IF(DAY(A{r})<=20;3;'
-            f'IF(DAY(A{r})<=27;4;5))))&" ("&IF(DAY(A{r})<=6;1;IF(DAY(A{r})<=13;7;IF(DAY(A{r})<=20;14;'
-            f'IF(DAY(A{r})<=27;21;28))))&"-"&IF(DAY(A{r})<=6;6;IF(DAY(A{r})<=13;13;IF(DAY(A{r})<=20;20;'
-            f'IF(DAY(A{r})<=27;27;DAY(EOMONTH(A{r};0))))))&")"'
-        ]]},
+        {'range': f'{sheet_ref}B{r}', 'values': [[week_formula(f'A{r}', month)]]},
         {'range': f'{sheet_ref}G{r}', 'values': [[f"=VLOOKUP(F{r};'{roster_sheet_escaped}'!$B:$B;1;0)"]]},
         {'range': f'{sheet_ref}M{r}', 'values': [[f'=AA{r}+Y{r}']]},
         {'range': f'{sheet_ref}AD{r}', 'values': [[f'=Z{r}/N{r}']]},
@@ -120,10 +146,19 @@ def write_formulas_cussons(sheet_ref, r, roster_sheet):
     ]
 
 
+def write_formulas_npure(sheet_ref, r, roster_sheet, ym, **_):
+    roster_sheet_escaped = roster_sheet.replace("'", "''")
+    return [
+        {'range': f'{sheet_ref}B{r}', 'values': [[npure_rules.week(f'A{r}', *ym)]]},
+        {'range': f'{sheet_ref}G{r}', 'values': [[f"=VLOOKUP(F{r};'{roster_sheet_escaped}'!$B:$B;1;0)"]]},
+        {'range': f'{sheet_ref}M{r}', 'values': [[f'=S{r}+U{r}']]},  # GMV SL = Revenue (Showcase) + Link GMV
+    ]
+
+
 PROFILES = {
     'ELLIPS': {
         'spreadsheet_id': '1tIG9FhUogXwBJK6YuzpT19nFlJs5EDfXA6EYQ493paE',
-        'sheet': 'RAW TAP  (20 April-31 August)',
+        'sheet': 'RAW TAP  (20 April-31 September)',
         'column_map': col_map_ellips(),
         'gmv_col': 'P',
         'dedup_cols': {'date': 'A', 'creator': 'G', 'product': 'J'},
@@ -134,14 +169,25 @@ PROFILES = {
     },
     'CUSSONS': {
         'spreadsheet_id': '1ZBOvn5fReBECSzgXrAS6SNuq7tWDaem9Cf_QhQN4b_8',
-        'sheet': 'TAP Cussons (1-30 September)',
+        'sheet': None,  # diisi main() sesuai bulan: tab_name('TAP', ...)
         'column_map': col_map_cussons(),
         'gmv_col': 'J',
         'dedup_cols': {'date': 'A', 'creator': 'F', 'product': 'H'},
         'auto_add_rows': True,
         'extra_fields_per_row': 7,  # B, G, M, AD, AE, AF, AG
         'write_formulas': write_formulas_cussons,
-        'roster_sheet': "Creator Performance PZ Cussons September'26",
+        'roster_sheet': None,  # diisi main() sesuai bulan
+    },
+    'NPURE': {
+        'spreadsheet_id': npure_rules.SPREADSHEET_ID,
+        'sheet': 'RAW DATA TAP',
+        'column_map': col_map_npure(),
+        'gmv_col': 'J',
+        'dedup_cols': {'date': 'A', 'creator': 'F', 'product': 'H'},
+        'auto_add_rows': True,
+        'extra_fields_per_row': 3,  # B, G, M
+        'write_formulas': write_formulas_npure,
+        'roster_sheet': None,  # None = ikut bulan tiap baris
     },
 }
 
@@ -152,9 +198,11 @@ def detect_brand_from_filename(path):
         return 'ELLIPS'
     if 'cussons' in name:
         return 'CUSSONS'
+    if 'npure' in name:
+        return 'NPURE'
     raise ValueError(
         f'Gak bisa deteksi brand dari nama file "{Path(path).name}" -- '
-        'pastikan nama filenya mengandung kata "ellips" atau "cussons".'
+        'pastikan nama filenya mengandung kata "ellips", "cussons", atau "npure".'
     )
 
 
@@ -192,9 +240,12 @@ MONTH_NAME_EN = {
 
 def roster_sheet_name(brand, year, month):
     """Nama tab roster creator per bulan -- beda pattern per brand.
-    ELLIPS: 'GMV Creator [SEPT]' / CUSSONS: "Creator Performance PZ Cussons September'26"."""
+    ELLIPS: 'GMV Creator [SEPT]' / CUSSONS: "Creator Performance PZ Cussons September'26"
+    / NPURE: 'Creator Performance-Sept'."""
     if brand == 'ELLIPS':
         return f'GMV Creator [{MONTH_ABBR_ID[month]}]'
+    if brand == 'NPURE':
+        return npure_rules.roster_name(year, month)
     return f"Creator Performance PZ Cussons {MONTH_NAME_EN[month]}'{str(year)[-2:]}"
 
 
@@ -236,6 +287,10 @@ def sync_creator_roster(service, spreadsheet_id, sheet_name, creator_names):
         return
 
     start_row = last_filled + 1
+    short = start_row + len(missing) - 1 - get_sheet_id_and_row_count(service, spreadsheet_id, sheet_name)[1]
+    if short > 0:  # grid tab roster bisa pas habis (NPURE Sept: 2881 baris terisi semua)
+        ensure_rows(service, spreadsheet_id, sheet_name, short)
+        print(f'  Grid roster "{sheet_name}" ditambah {short} baris.')
     data = [{'range': f"'{sheet_name}'!{col}{start_row + i}", 'values': [[name]]}
             for i, name in enumerate(missing)]
     service.spreadsheets().values().batchUpdate(
@@ -514,14 +569,12 @@ def write_new_rows(service, brand, profile, to_insert, src_col_index, next_row):
                 val = force_text_if_long_id(val)
             value_ranges.append({'range': f'{sheet_ref}{dest_col}{r}', 'values': [[val if val is not None else '']]})
 
-        roster_sheet = profile['roster_sheet']
-        if roster_sheet is None:
-            ym = extract_year_month(row.get(src_col_index['A']))
-            if ym is None:
-                today = datetime.date.today()
-                ym = (today.year, today.month)
-            roster_sheet = roster_sheet_name(brand, *ym)
-        value_ranges.extend(profile['write_formulas'](sheet_ref, r, roster_sheet))
+        ym = extract_year_month(row.get(src_col_index['A']))
+        if ym is None:
+            today = datetime.date.today()
+            ym = (today.year, today.month)
+        roster_sheet = profile['roster_sheet'] or roster_sheet_name(brand, *ym)
+        value_ranges.extend(profile['write_formulas'](sheet_ref, r, roster_sheet, ym=ym))
 
     entries_per_row = len(column_map) + profile['extra_fields_per_row']
     chunk_rows = 700
@@ -532,7 +585,8 @@ def write_new_rows(service, brand, profile, to_insert, src_col_index, next_row):
             spreadsheetId=spreadsheet_id,
             body={'valueInputOption': 'USER_ENTERED', 'data': chunk}
         ).execute()
-        print(f'  ... tertulis {start + n}/{len(to_insert)} baris')
+        print(f'Tertulis {start + n}/{len(to_insert)} baris baru '
+              f'(baris {next_row + start}-{next_row + start + n - 1}).')
 
 
 def main():
@@ -541,14 +595,30 @@ def main():
         return
 
     brand = detect_brand_from_filename(SOURCE_XLSX_PATH)
-    profile = PROFILES[brand]
-    print(f'Brand terdeteksi dari nama file: {brand}  ->  target tab "{profile["sheet"]}"')
+    profile = dict(PROFILES[brand])
 
     print('Membaca file sumber...')
     valid_rows, src_col_index, idx_date, idx_creator, idx_product = read_source_file(
         SOURCE_XLSX_PATH, profile['column_map'], profile['gmv_col']
     )
     print(f'Ketemu {len(valid_rows)} baris data valid.')
+
+    month_of = lambda row: extract_year_month(row.get(idx_date))
+    if brand == 'CUSSONS':
+        year, month = cussons_month.target_month(
+            FILTER_YEAR, FILTER_MONTH, [ym for ym in map(month_of, valid_rows) if ym])
+        profile['sheet'] = cussons_month.tab_name('TAP', year, month)
+        profile['roster_sheet'] = cussons_month.roster_name(year, month)
+        profile['write_formulas'] = partial(write_formulas_cussons, month=month)
+        wanted = (year, month)
+    else:
+        wanted = (FILTER_YEAR, FILTER_MONTH) if FILTER_MONTH else None
+    if wanted:
+        before = len(valid_rows)
+        valid_rows = [row for row in valid_rows if month_of(row) == wanted]
+        print(f'Filter bulan {wanted[1]}/{wanted[0]}: {before - len(valid_rows)} baris di luar bulan itu dilewati.')
+
+    print(f'Brand terdeteksi dari nama file: {brand}  ->  target tab "{profile["sheet"]}"')
     if not valid_rows:
         print('Tidak ada baris data valid, berhenti.')
         return
@@ -595,11 +665,12 @@ def main():
     print('Menulis ke Google Sheets...')
     write_new_rows(service, brand, profile, to_insert, src_col_index, next_row)
 
-    print('\nSinkronisasi roster creator (khusus sumber TAP)...')
-    sync_roster_from_records(
-        service, profile['spreadsheet_id'], brand,
-        [(row.get(idx_creator, ''), row.get(idx_date)) for row in to_insert]
-    )
+    if profile.get('sync_roster', True):
+        print('\nSinkronisasi roster creator (khusus sumber TAP)...')
+        sync_roster_from_records(
+            service, profile['spreadsheet_id'], brand,
+            [(row.get(idx_creator, ''), row.get(idx_date)) for row in to_insert]
+        )
 
     print(f'\nSELESAI. {len(to_insert)} baris baru ditambahkan, {skipped} dilewati.')
 

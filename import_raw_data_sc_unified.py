@@ -1,43 +1,56 @@
 """
-IMPORT SC_GMV -> Raw Data SC / SC Cussons  [UNIFIED: Ellips & Cussons]
+IMPORT SC_GMV -> Raw Data SC / SC Cussons / RAW DATA SC  [UNIFIED: Ellips, Cussons & NPURE]
 ================================================================================
 Satu script, brand dideteksi otomatis dari NAMA FILE SOURCE_XLSX_PATH (harus
-mengandung kata "ellips" atau "cussons", case-insensitive). Struktur kolom &
+mengandung kata "ellips", "cussons", atau "npure", case-insensitive). Struktur kolom &
 formula tujuan beda antar brand -- semuanya di-drive dari PROFILES di bawah,
 bukan hardcode di logic.
 
 - ELLIPS -> tab "Raw Data SC (20 April-31 July)", 26 kolom + field komisi
   lengkap (commission model, Shop Ads commission, co-funded creator bonus, dll)
-- CUSSONS -> tab "SC Cussons (1-30 September)", 19 kolom (A-S), lebih sederhana, gak ada
+- CUSSONS -> tab "SC Cussons (1-31 October)" dst (per bulan, lihat FILTER_MONTH), 19 kolom (A-S), lebih sederhana, gak ada
   field komisi selengkap Ellips. (Formatnya diasumsikan sama kayak SC_GMV
   Ellips karena belum ada contoh file SC_GMV Cussons asli saat script ini
   dibuat -- validasi ulang begitu file beneran ada.)
 
-DEDUP (kedua brand sama): kombinasi Order ID + Product ID + SKU ID yang PERSIS
+- NPURE -> tab "RAW DATA SC", header baris 2 (data mulai baris 3), kolom A-T.
+  Creator di A, cek roster di B (VLOOKUP ke "Creator Performance-<Bulan>" sesuai
+  bulan Time Created), Item Sold = Payment Amount / Harga, Channel, Date, Week
+  (Kamis-Rabu, lihat npure_rules.py). Format tanggal kolom O/P/R/S/T ikut diset.
+  Header sumber boleh Inggris (Order ID) atau Indonesia (ID Pesanan).
+
+DEDUP (semua brand sama): kombinasi Order ID + Product ID + SKU ID yang PERSIS
 sama dengan yang udah ada di sheet akan dilewati.
 
 CARA PAKAI:
-1. Isi SOURCE_XLSX_PATH -- nama filenya HARUS ada kata "ellips" atau "cussons".
+1. Isi SOURCE_XLSX_PATH -- nama filenya HARUS ada kata "ellips", "cussons", atau "npure".
 2. python import_raw_data_sc_unified.py
 """
 
 import csv
 import datetime
+import zipfile
 from pathlib import Path
 
 import openpyxl
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
+import cussons_month
+import npure_rules
+from cussons_month import week_formula
+
 # ============== KONFIGURASI -- ISI INI ==============
 CREDENTIALS_FILE = 'credentials.json'
-SOURCE_XLSX_PATH = r''
-SOURCE_SHEET_NAME = ''  # CEK & GANTI sesuai file kamu (diabaikan kalau sumbernya .csv)
+SOURCE_XLSX_PATH = r'C:\Users\Subhan\OneDrive\Documents\Automasi\SC_GMV ellips (20-26 August) (1).csv'
+SOURCE_SHEET_NAME = 'affiliate_orders_76702350440273'  # CEK & GANTI sesuai file kamu (diabaikan kalau sumbernya .csv)
 
 # Filter bulan: cuma order yang Time Created-nya jatuh di bulan/tahun ini
 # yang akan dimasukin. Set FILTER_MONTH = None kalau mau semua bulan.
 FILTER_YEAR = 2026
 FILTER_MONTH = None  # laporan SC_GMV gak selalu align ke Time Created -- default ambil semua
+# Cussons: tab, roster & rumus WEEK ikut bulan ini. FILTER_MONTH = None -> otomatis pakai
+# bulan terbanyak di file (dan baris di luar bulan itu dilewati).
 # ======================================================
 
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
@@ -68,6 +81,19 @@ def col_map_cussons():
     ]
 
 
+def col_map_npure():
+    # Nama header sumber: Inggris (export TikTok biasa) atau Indonesia (header tab RAW DATA SC).
+    return [
+        ('A', 'Creator Username'), ('C', ('Order ID', 'ID Pesanan')), ('D', ('Product ID', 'ID Produk')),
+        ('E', ('Product Name', 'Produk')), ('F', ('SKU ID', 'ID SKU')), ('G', ('Price', 'Harga')),
+        ('H', 'Payment Amount'), ('J', ('Payment method', 'Metode Pembayaran')),
+        ('K', ('Order Status', 'Status Pesanan')), ('L', ('Content Type', 'Jenis Konten')),
+        ('N', ('Content ID', 'ID Konten')), ('O', ('Time Created', 'Waktu Dibuat')),
+        ('R', ('Payment time', 'Waktu Pembayaran')), ('S', 'Order Delivery Time'),
+        ('T', ('Time Commission Paid', 'Waktu Komisi Dibayar')),
+    ]
+
+
 def write_formulas_ellips(sheet_ref, r, roster_sheet):
     """Ellips: M=Cek Name, O=Channel, AB=Time Created(udah ditulis via COLUMN_MAP),
     AC=Date(TEXT), AD=WEEK."""
@@ -88,7 +114,7 @@ def write_formulas_ellips(sheet_ref, r, roster_sheet):
     ]
 
 
-def write_formulas_cussons(sheet_ref, r, roster_sheet, row=None, src_col_index=None, idx_time_created=None):
+def write_formulas_cussons(sheet_ref, r, roster_sheet, row=None, src_col_index=None, idx_time_created=None, month=None):
     """Cussons: L=Cek Creator, N=Channels, R=Date(nilai polos, bukan formula), S=WEEK."""
     roster_sheet_escaped = roster_sheet.replace("'", "''")
     dt = parse_datetime_flexible(row[idx_time_created])
@@ -99,32 +125,70 @@ def write_formulas_cussons(sheet_ref, r, roster_sheet, row=None, src_col_index=N
             f'=IF(ISNUMBER(SEARCH("Livestream";M{r}));"LIVE STREAMING";'
             f'IF(ISNUMBER(SEARCH("Video";M{r}));"SHORT VIDEO";"SHARELINK"))'
         ]]},
-        {'range': f'{sheet_ref}S{r}', 'values': [[
-            f'=UPPER(TEXT(R{r};"MMM"))&" W"&IF(DAY(R{r})<=6;1;IF(DAY(R{r})<=13;2;IF(DAY(R{r})<=20;3;'
-            f'IF(DAY(R{r})<=27;4;5))))&" ("&IF(DAY(R{r})<=6;1;IF(DAY(R{r})<=13;7;IF(DAY(R{r})<=20;14;'
-            f'IF(DAY(R{r})<=27;21;28))))&"-"&IF(DAY(R{r})<=6;6;IF(DAY(R{r})<=13;13;IF(DAY(R{r})<=20;20;'
-            f'IF(DAY(R{r})<=27;27;DAY(EOMONTH(R{r};0))))))&")"'
-        ]]},
+        {'range': f'{sheet_ref}S{r}', 'values': [[week_formula(f'R{r}', month)]]},
     ]
     return entries
+
+
+def write_formulas_npure(sheet_ref, r, row, idx_time_created):
+    """NPURE: B=Cek creator, I=Item Sold (=Payment/Harga), M=Channel, P=Date (nilai polos),
+    Q=Week. Roster + week ikut bulan Time Created baris itu."""
+    dt = parse_datetime_flexible(row[idx_time_created])
+    today = datetime.date.today()
+    ym = (dt.year, dt.month) if dt else (today.year, today.month)
+    roster = npure_rules.roster_name(*ym).replace("'", "''")
+    return [
+        {'range': f'{sheet_ref}B{r}', 'values': [[f"=VLOOKUP(A{r};'{roster}'!B:B;1;0)"]]},
+        {'range': f'{sheet_ref}I{r}', 'values': [[f'=H{r}/G{r}']]},
+        {'range': f'{sheet_ref}M{r}', 'values': [[
+            f'=IF(ISNUMBER(SEARCH("livestream";L{r}));"LIVE STREAMING";'
+            f'IF(ISNUMBER(SEARCH("video";L{r}));"SHORT VIDEO";"SHARE LINK"))'
+        ]]},
+        {'range': f'{sheet_ref}P{r}', 'values': [[to_serial_date_only(dt)]]},
+        {'range': f'{sheet_ref}Q{r}', 'values': [[npure_rules.week(f'P{r}', *ym)]]},
+    ]
 
 
 PROFILES = {
     'ELLIPS': {
         'spreadsheet_id': '1tIG9FhUogXwBJK6YuzpT19nFlJs5EDfXA6EYQ493paE',
-        'sheet': 'Raw Data SC (20 April-31 August)',
+        'sheet': 'Raw Data SC (20 April-30 September)',
         'roster_sheet': 'GMV Creator [SEPT]',
         'column_map': col_map_ellips(),
         'extra_fields_per_row': 4,  # M, O, AC, AD
         'needs_row_data_for_formula': False,
+        # kolom tujuan buat Order ID / Product ID / SKU ID / Time Created (dedup & bulan)
+        'key_cols': ('A', 'B', 'D', 'AB'),
+        'dedup_header': 'Order ID',
+        'time_cols': {'AB'},
+        'formats': {},
     },
     'CUSSONS': {
         'spreadsheet_id': '1ZBOvn5fReBECSzgXrAS6SNuq7tWDaem9Cf_QhQN4b_8',
-        'sheet': 'SC Cussons (1-30 September)',
-        'roster_sheet': "Creator Performance PZ Cussons September'26",
+        'sheet': None,  # diisi main() sesuai bulan: tab_name('SC', ...)
+        'roster_sheet': None,  # diisi main() sesuai bulan
         'column_map': col_map_cussons(),
         'extra_fields_per_row': 4,  # R, L, N, S
         'needs_row_data_for_formula': True,
+        'key_cols': ('A', 'B', 'D', 'Q'),
+        'dedup_header': 'Order ID',
+        'time_cols': {'Q'},
+        'formats': {},
+    },
+    'NPURE': {
+        'spreadsheet_id': npure_rules.SPREADSHEET_ID,
+        'sheet': 'RAW DATA SC',
+        'roster_sheet': None,  # ikut bulan tiap baris
+        'column_map': col_map_npure(),
+        'extra_fields_per_row': 5,  # B, I, M, P, Q
+        'needs_row_data_for_formula': True,
+        'key_cols': ('C', 'D', 'F', 'O'),
+        'dedup_header': 'ID Pesanan',
+        'time_cols': {'O', 'R', 'S', 'T'},
+        # baris baru di bawah data belum ke-format -- set biar gak muncul angka mentah
+        'formats': {'P': ('DATE', 'dd"-"mm"-"yyyy'),
+                    'O': ('DATE_TIME', 'dd/mm/yyyy h:mm:ss'), 'R': ('DATE_TIME', 'dd/mm/yyyy h:mm:ss'),
+                    'S': ('DATE_TIME', 'dd/mm/yyyy h:mm:ss'), 'T': ('DATE_TIME', 'dd/mm/yyyy h:mm:ss')},
     },
 }
 
@@ -135,9 +199,11 @@ def detect_brand_from_filename(path):
         return 'ELLIPS'
     if 'cussons' in name:
         return 'CUSSONS'
+    if 'npure' in name:
+        return 'NPURE'
     raise ValueError(
         f'Gak bisa deteksi brand dari nama file "{Path(path).name}" -- '
-        'pastikan nama filenya mengandung kata "ellips" atau "cussons".'
+        'pastikan nama filenya mengandung kata "ellips", "cussons", atau "npure".'
     )
 
 
@@ -193,30 +259,27 @@ def read_rows_from_xlsx(path):
     return list(ws.iter_rows(values_only=True))
 
 
-def read_source_file(path, column_map):
-    rows = read_rows_from_csv(path) if str(path).lower().endswith('.csv') else read_rows_from_xlsx(path)
+def read_source_file(path, column_map, key_cols):
+    # dicek dari isi, bukan ekstensi: export kadang kesimpen tanpa ".csv" di nama
+    # filenya. File .xlsx selalu arsip zip, selain itu dibaca sebagai CSV.
+    rows = read_rows_from_xlsx(path) if zipfile.is_zipfile(path) else read_rows_from_csv(path)
     if not rows:
         raise ValueError('Sheet sumber kosong.')
     header = [str(h).strip() if h is not None else '' for h in rows[0]]
 
-    def col_idx(name):
-        return header.index(name) if name in header else -1
-
     src_col_index = {}
     missing = []
-    for dest_col, name in column_map:
-        idx = col_idx(name)
+    for dest_col, names in column_map:
+        names = (names,) if isinstance(names, str) else names
+        idx = next((header.index(n) for n in names if n in header), -1)
         if idx == -1:
-            missing.append(name)
+            missing.append(' / '.join(names))
         else:
             src_col_index[dest_col] = idx
     if missing:
         raise ValueError(f'Kolom berikut tidak ketemu di header: {", ".join(missing)}')
 
-    idx_order_id = col_idx('Order ID')
-    idx_product_id = col_idx('Product ID')
-    idx_sku_id = col_idx('SKU ID')
-    idx_time_created = col_idx('Time Created')
+    idx_order_id, idx_product_id, idx_sku_id, idx_time_created = (src_col_index[c] for c in key_cols)
 
     data_rows = rows[1:]
     if len(data_rows) < 4:
@@ -261,9 +324,10 @@ def ensure_rows(service, spreadsheet_id, sheet_name, rows_needed):
     return current_rows + rows_needed
 
 
-def get_existing_keys(service, spreadsheet_id, sheet_name):
-    """Baca kolom A (Order ID), B (Product ID), D (SKU ID), chunk per 30rb baris."""
+def get_existing_keys(service, spreadsheet_id, sheet_name, key_cols=('A', 'B', 'D'), header_label='Order ID'):
+    """Baca kolom Order ID / Product ID / SKU ID (posisi beda per brand), chunk per 30rb baris."""
     _, target_max_row = get_sheet_id_and_row_count(service, spreadsheet_id, sheet_name)
+    c_order, c_product, c_sku = key_cols
 
     chunk_size = 30000
     col_a, col_b, col_d = [], [], []
@@ -271,9 +335,9 @@ def get_existing_keys(service, spreadsheet_id, sheet_name):
         end = min(start + chunk_size - 1, target_max_row)
         resp = service.spreadsheets().values().batchGet(
             spreadsheetId=spreadsheet_id,
-            ranges=[f"'{sheet_name}'!A{start}:A{end}",
-                    f"'{sheet_name}'!B{start}:B{end}",
-                    f"'{sheet_name}'!D{start}:D{end}"]
+            ranges=[f"'{sheet_name}'!{c_order}{start}:{c_order}{end}",
+                    f"'{sheet_name}'!{c_product}{start}:{c_product}{end}",
+                    f"'{sheet_name}'!{c_sku}{start}:{c_sku}{end}"]
         ).execute()
         vr = resp.get('valueRanges', [])
         a_vals = vr[0].get('values', []) if len(vr) > 0 else []
@@ -287,11 +351,11 @@ def get_existing_keys(service, spreadsheet_id, sheet_name):
 
     header_row = None
     for i, row in enumerate(col_a):
-        if row and row[0] == 'Order ID':
+        if row and row[0] == header_label:
             header_row = i
             break
     if header_row is None:
-        raise ValueError(f'Header "Order ID" tidak ketemu di kolom A sheet {sheet_name}.')
+        raise ValueError(f'Header "{header_label}" tidak ketemu di kolom {c_order} sheet {sheet_name}.')
 
     data_start = header_row + 1
     existing_keys = set()
@@ -330,7 +394,7 @@ def write_new_rows(service, brand, profile, to_insert, src_col_index, idx_time_c
         r = next_row + idx
         for dest_col, _ in column_map:
             val = row[src_col_index[dest_col]]
-            if dest_col == ('AB' if brand == 'ELLIPS' else 'Q'):  # kolom Time Created
+            if dest_col in profile['time_cols']:  # kolom Time Created (& waktu lain di NPURE)
                 dt = parse_datetime_flexible(val)
                 val = to_serial_datetime(dt)
             else:
@@ -339,10 +403,13 @@ def write_new_rows(service, brand, profile, to_insert, src_col_index, idx_time_c
 
         if brand == 'ELLIPS':
             value_ranges.extend(write_formulas_ellips(sheet_ref, r, profile['roster_sheet']))
+        elif brand == 'NPURE':
+            value_ranges.extend(write_formulas_npure(sheet_ref, r, row, idx_time_created))
         else:
             value_ranges.extend(write_formulas_cussons(
                 sheet_ref, r, profile['roster_sheet'],
-                row=row, src_col_index=src_col_index, idx_time_created=idx_time_created
+                row=row, src_col_index=src_col_index, idx_time_created=idx_time_created,
+                month=profile['month']
             ))
 
     entries_per_row = len(column_map) + profile['extra_fields_per_row']
@@ -354,7 +421,31 @@ def write_new_rows(service, brand, profile, to_insert, src_col_index, idx_time_c
             spreadsheetId=spreadsheet_id,
             body={'valueInputOption': 'USER_ENTERED', 'data': chunk}
         ).execute()
-        print(f'  ... tertulis {start + n}/{len(to_insert)} baris')
+        print(f'Tertulis {start + n}/{len(to_insert)} baris baru '
+              f'(baris {next_row + start}-{next_row + start + n - 1}).')
+
+
+def col_letter_to_index(letters):
+    n = 0
+    for ch in letters:
+        n = n * 26 + (ord(ch) - 64)
+    return n - 1
+
+
+def apply_formats(service, spreadsheet_id, sheet_name, formats, first_row, last_row):
+    """Set number format kolom tanggal/waktu di baris baru (profile['formats'] = {kolom: (type, pattern)})."""
+    if not formats:
+        return
+    sheet_id, _ = get_sheet_id_and_row_count(service, spreadsheet_id, sheet_name)
+    requests = []
+    for col, (fmt_type, pattern) in formats.items():
+        c = col_letter_to_index(col)
+        requests.append({'repeatCell': {
+            'range': {'sheetId': sheet_id, 'startRowIndex': first_row - 1, 'endRowIndex': last_row,
+                      'startColumnIndex': c, 'endColumnIndex': c + 1},
+            'cell': {'userEnteredFormat': {'numberFormat': {'type': fmt_type, 'pattern': pattern}}},
+            'fields': 'userEnteredFormat.numberFormat'}})
+    service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body={'requests': requests}).execute()
 
 
 def main():
@@ -363,13 +454,25 @@ def main():
         return
 
     brand = detect_brand_from_filename(SOURCE_XLSX_PATH)
-    profile = PROFILES[brand]
-    print(f'Brand terdeteksi dari nama file: {brand}  ->  target tab "{profile["sheet"]}"')
+    profile = dict(PROFILES[brand])
 
     print('Membaca file sumber...')
     valid_rows, src_col_index, idx_order_id, idx_product_id, idx_sku_id, idx_time_created, filtered_out_month = \
-        read_source_file(SOURCE_XLSX_PATH, profile['column_map'])
+        read_source_file(SOURCE_XLSX_PATH, profile['column_map'], profile['key_cols'])
     print(f'Ketemu {len(valid_rows)} baris data valid.')
+
+    if brand == 'CUSSONS':
+        def month_of(row):
+            dt = parse_datetime_flexible(row[idx_time_created])
+            return (dt.year, dt.month) if dt else None
+        year, month = cussons_month.target_month(
+            FILTER_YEAR, FILTER_MONTH, [ym for ym in map(month_of, valid_rows) if ym])
+        profile.update(sheet=cussons_month.tab_name('SC', year, month),
+                       roster_sheet=cussons_month.roster_name(year, month), month=month)
+        before = len(valid_rows)
+        valid_rows = [row for row in valid_rows if month_of(row) == (year, month)]
+        filtered_out_month += before - len(valid_rows)
+    print(f'Brand terdeteksi dari nama file: {brand}  ->  target tab "{profile["sheet"]}"')
     if FILTER_MONTH is not None:
         print(f'Filter bulan aktif ({FILTER_MONTH}/{FILTER_YEAR}): {filtered_out_month} order di luar bulan itu dilewati.')
     if not valid_rows:
@@ -379,7 +482,7 @@ def main():
     print('Connect ke Google Sheets, ambil data existing buat dedup...')
     service = get_sheets_service()
     existing_keys, data_start_sheet_row, next_row, target_max_row = get_existing_keys(
-        service, profile['spreadsheet_id'], profile['sheet']
+        service, profile['spreadsheet_id'], profile['sheet'], profile['key_cols'][:3], profile['dedup_header']
     )
     print(f'Ada {len(existing_keys)} kombinasi Order ID+Product ID+SKU ID yang udah ada di sheet.')
 
@@ -410,6 +513,8 @@ def main():
     print(f'{skipped} dilewati (kombinasi Order ID+Product ID+SKU ID sudah ada).')
     print('Menulis ke Google Sheets...')
     write_new_rows(service, brand, profile, to_insert, src_col_index, idx_time_created, next_row)
+    apply_formats(service, profile['spreadsheet_id'], profile['sheet'], profile['formats'],
+                  next_row, next_row + len(to_insert) - 1)
 
     print(f'\nSELESAI. {len(to_insert)} baris baru ditambahkan, {skipped} dilewati.')
 

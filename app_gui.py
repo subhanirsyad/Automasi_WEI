@@ -1,10 +1,9 @@
 """
 GUI - Automasi Import Data
 ================================================================================
-Antarmuka desktop untuk import Ellips/Cussons dan sync TAP LS/SV/Content PC/BW.
-Mode cloud menerima link sumber/tujuan, nama tab, tahun, bulan, dan (untuk
-Content BW) week; preview bersifat baca-saja, sedangkan impor hanya berjalan
-setelah konfirmasi pengguna.
+Antarmuka desktop untuk import Ellips/Cussons/NPURE dan sync TAP LS/SV/Content PC/BW.
+Mode cloud menerima link sumber/tujuan, nama tab, tahun, dan bulan; preview
+bersifat baca-saja, sedangkan impor hanya berjalan setelah konfirmasi pengguna.
 
 CARA PAKAI:
     python app_gui.py
@@ -40,6 +39,7 @@ COLOR_NAV_SELECTED = ('#d7e2fb', '#22314f')
 SPREADSHEET_IDS = {
     'ELLIPS': '1tIG9FhUogXwBJK6YuzpT19nFlJs5EDfXA6EYQ493paE',
     'CUSSONS': '1ZBOvn5fReBECSzgXrAS6SNuq7tWDaem9Cf_QhQN4b_8',
+    'NPURE': '1DDTEyL4L1Pyn72PejKN0_rZauyYz9Tjf1-XCD77QE_Q',
 }
 
 FILE_IMPORT_TYPES = {
@@ -49,7 +49,7 @@ FILE_IMPORT_TYPES = {
         'module': 'import_raw_tap_unified',
         'filetypes': [('Excel files', '*.xlsx')],
         'auto_brand': True,
-        'has_month_filter': False,
+        'has_month_filter': True,
         'file_hint': ['tap_gmv'],
     },
     'Raw Data SC': {
@@ -95,6 +95,24 @@ IMPORT_TYPES = {
         'default_target_tab': 'LS 1-30',
         'date_column': 'Date Live',
         'cloud_source': True,
+        'append_bottom': True,
+    },
+    'TAP LS PC (Excel)': {
+        'group': 'PC',
+        'label': 'TAP LS (Excel)',
+        'icon': '📄',
+        'subtitle': 'Raw Excel lokal → tab LS per brand (GMV / Date Live)',
+        'module': 'sync_tap_ls_pc',
+        'script': 'sync_tap_ls_pc.py',
+        'default_source': '',
+        'default_target': 'https://docs.google.com/spreadsheets/d/1TjViP0sreDwohIhnsSM2heKPdlZJpyyLyTW4iLf6PTI/edit',
+        'default_source_tab': 'Custom report',
+        'default_target_tab': 'LS 1-30',
+        'date_column': 'Date Live',
+        'cloud_source': True,
+        'local_source': True,
+        'local_file_glob': 'TAP LS PC*.xlsx',
+        'append_bottom': True,
     },
     'TAP SV PC (Drive)': {
         'group': 'PC',
@@ -109,6 +127,23 @@ IMPORT_TYPES = {
         'default_target_tab': 'SV 1-30',
         'date_column': 'Date Post',
         'cloud_source': True,
+    },
+    'TAP SV PC (Excel)': {
+        'group': 'PC',
+        'label': 'TAP SV (Excel)',
+        'icon': '📄',
+        'subtitle': 'Raw Excel lokal → tab SV per brand (brand dari Product name)',
+        'module': 'sync_tap_sv_pc',
+        'script': 'sync_tap_sv_pc.py',
+        'default_source': '',
+        'default_target': 'https://docs.google.com/spreadsheets/d/1TjViP0sreDwohIhnsSM2heKPdlZJpyyLyTW4iLf6PTI/edit',
+        'default_source_tab': 'Custom report',
+        'default_target_tab': 'SV 1-30',
+        'date_column': 'Date Post',
+        'cloud_source': True,
+        'local_source': True,
+        'local_file_glob': 'TAP VID PC*.xlsx',
+        'append_bottom': True,
     },
     'Content LS PC (Drive)': {
         'group': 'PC',
@@ -130,7 +165,7 @@ IMPORT_TYPES = {
         'group': 'BW',
         'label': 'Raw TAP LS',
         'icon': 'BW',
-        'subtitle': 'Custom report -> raw LS per brand (semua GMV / non-GMV bulan terpilih)',
+        'subtitle': 'Semua GMV + non-GMV bulan terpilih ke baris kosong paling bawah',
         'module': 'sync_tap_ls_bw',
         'script': 'sync_tap_ls_bw.py',
         'default_source': 'https://docs.google.com/spreadsheets/d/1fsGXggZKQEozmoafhMONp_ulHd-PQbhs63e4YkiPUS8/edit',
@@ -139,33 +174,89 @@ IMPORT_TYPES = {
         'default_target_tab': 'LS',
         'date_column': 'Date Live',
         'cloud_source': True,
+        'append_all_matches': True,
+        'append_bottom': True,
+    },
+    'TAP LS BW (Excel)': {
+        'group': 'BW',
+        'label': 'Raw TAP LS (Excel)',
+        'icon': 'BW',
+        'subtitle': 'Raw Excel lokal -> semua GMV + non-GMV bulan terpilih ke baris kosong paling bawah',
+        'module': 'sync_tap_ls_bw',
+        'script': 'sync_tap_ls_bw.py',
+        'default_source': '',
+        'default_target': 'https://docs.google.com/spreadsheets/d/17B536kbB0bXrZ1xLoLwCNyPpZQ83VEBTOjO2Inw7ipE/edit',
+        'default_source_tab': 'Custom report',
+        'default_target_tab': 'LS',
+        'date_column': 'Date Live',
+        'cloud_source': True,
+        'local_source': True,
+        # Digit right after "TAP LS " skips the PC exports (TAP LS PC ...).
+        'local_file_glob': 'TAP LS [0-9]*.xlsx',
+        'append_all_matches': True,
+        'append_bottom': True,
+    },
+    'TAP SV BW (Excel)': {
+        'group': 'BW',
+        'label': 'Raw TAP SV (Excel)',
+        'icon': 'BW',
+        'subtitle': 'Raw Excel lokal -> semua GMV + GMV 0 bulan terpilih (Date Post) ke SV 1-30',
+        'module': 'sync_tap_sv_bw',
+        'script': 'sync_tap_sv_bw.py',
+        'default_source': '',
+        'default_target': 'https://docs.google.com/spreadsheets/d/17B536kbB0bXrZ1xLoLwCNyPpZQ83VEBTOjO2Inw7ipE/edit',
+        'default_source_tab': 'Custom report',
+        'default_target_tab': 'SV 1-30',
+        'date_column': 'Date Post',
+        'cloud_source': True,
+        'local_source': True,
+        'local_file_glob': 'TAP SV [0-9]*.xlsx',
+        'append_all_matches': True,
+        'append_bottom': True,
     },
     'Content LS BW (Sheets)': {
         'group': 'BW',
         'label': 'Content LS',
         'icon': 'BW',
-        'subtitle': 'Raw LS -> 7 tab Content brand, filter bulan + Week, tanpa split PAID',
+        'subtitle': 'Raw LS -> 7 tab LS [brand], Date Live bulan terpilih, PAID tampil lewat rumus FILTER',
         'module': 'sync_bw_content',
         'script': 'sync_bw_content.py',
         'default_source': 'https://docs.google.com/spreadsheets/d/17B536kbB0bXrZ1xLoLwCNyPpZQ83VEBTOjO2Inw7ipE/edit',
         'default_target': 'https://docs.google.com/spreadsheets/d/1XLtBKqCtJPWzOf0GvxGVRyoaa1xpHo6U8qTK6Ch7xMI/edit',
         'default_source_tab': 'LS',
         'default_target_tab': '7 tab brand otomatis',
-        'default_week': 'Week 2',
         'date_column': 'Date Live',
         'cloud_source': True,
         'content_source': True,
         'bw_content': True,
     },
+    'Content LS BW (Excel)': {
+        'group': 'BW',
+        'label': 'Content LS (Excel)',
+        'icon': 'BW',
+        'subtitle': 'Raw Excel lokal -> 7 tab LS [brand], Date Live sesuai rentang file, PAID tampil lewat rumus FILTER',
+        'module': 'sync_bw_content',
+        'script': 'sync_bw_content.py',
+        'default_source': '',
+        'default_target': 'https://docs.google.com/spreadsheets/d/1XLtBKqCtJPWzOf0GvxGVRyoaa1xpHo6U8qTK6Ch7xMI/edit',
+        'default_source_tab': 'Custom report',
+        'default_target_tab': '7 tab brand otomatis',
+        'date_column': 'Date Live',
+        'cloud_source': True,
+        'local_source': True,
+        'local_file_glob': 'TAP LS [0-9]*.xlsx',
+        'content_source': True,
+        'bw_content': True,
+    },
 }
 
-for brand in ('ELLIPS', 'CUSSONS'):
+for brand in ('ELLIPS', 'CUSSONS', 'NPURE'):
     for label, template in FILE_IMPORT_TYPES.items():
         IMPORT_TYPES[f'{brand} / {label}'] = {
             **template, 'group': brand, 'brand': brand, 'label': label,
         }
 
-GROUP_LABELS = {'PC': 'PC', 'BW': 'BW', 'ELLIPS': 'Ellips', 'CUSSONS': 'Cussons'}
+GROUP_LABELS = {'PC': 'PC', 'BW': 'BW', 'ELLIPS': 'Ellips', 'CUSSONS': 'Cussons', 'NPURE': 'NPURE'}
 
 MONTHS = ['Semua bulan', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
           'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']
@@ -177,6 +268,8 @@ def detect_brand_from_filename(name):
         return 'ELLIPS'
     if 'cussons' in name:
         return 'CUSSONS'
+    if 'npure' in name:
+        return 'NPURE'
     return None
 
 
@@ -251,7 +344,7 @@ class App(ctk.CTk):
         header = ctk.CTkFrame(sidebar, fg_color='transparent')
         header.pack(fill='x', padx=22, pady=(28, 22))
         ctk.CTkLabel(header, text='⚡ Automasi', font=self.font_title, anchor='w').pack(fill='x')
-        ctk.CTkLabel(header, text='PC, Ellips & Cussons', font=self.font_small,
+        ctk.CTkLabel(header, text='PC, BW, Ellips, Cussons & NPURE', font=self.font_small,
                      text_color=COLOR_TEXT_MUTED, anchor='w').pack(fill='x', pady=(2, 0))
 
         ctk.CTkFrame(sidebar, height=1, fg_color=('#d3d7de', '#2a2d34')).pack(fill='x', padx=22, pady=(0, 14))
@@ -384,7 +477,7 @@ class App(ctk.CTk):
         ctk.CTkEntry(month_row, textvariable=self.year_var, width=70, height=36,
                      font=self.font_body).pack(side='left', padx=(8, 0))
 
-        # ---- card: TAP LS PC from Google Drive ----
+        # ---- card: cloud imports from Google Drive ----
         self.drive_card = card(outer)
         self.drive_card.grid(row=2, column=0, sticky='ew', pady=(0, 16))
         drive_inner = ctk.CTkFrame(self.drive_card, fg_color='transparent')
@@ -410,11 +503,17 @@ class App(ctk.CTk):
             label_widget = ctk.CTkLabel(drive_inner, text=label, font=self.font_small,
                                         text_color=COLOR_TEXT_MUTED, anchor='w')
             label_widget.grid(row=row_no, column=0, columnspan=2, sticky='w')
+            entry_row = ctk.CTkFrame(drive_inner, fg_color='transparent')
+            entry_row.grid(row=row_no + 1, column=0, columnspan=2, sticky='ew', pady=(4, 12))
+            ctk.CTkEntry(entry_row, textvariable=variable, height=36,
+                         font=self.font_body).pack(side='left', fill='x', expand=True)
             if row_no == 1:
                 self.drive_source_label = label_widget
-            ctk.CTkEntry(drive_inner, textvariable=variable, height=36,
-                         font=self.font_body).grid(row=row_no + 1, column=0,
-                                                   columnspan=2, sticky='ew', pady=(4, 12))
+                self.drive_browse_button = ctk.CTkButton(
+                    entry_row, text='Browse...', width=110, height=36, font=self.font_body,
+                    fg_color=COLOR_ACCENT, hover_color=COLOR_ACCENT_HOVER,
+                    command=self._browse_drive_source,
+                )
 
         self.drive_source_tab_var = ctk.StringVar(value='Custom report')
         self.drive_target_tab_var = ctk.StringVar(value='LS 1-30')
@@ -430,10 +529,16 @@ class App(ctk.CTk):
                 self.drive_source_tab_label = label_widget
             else:
                 self.drive_target_tab_label = label_widget
-            ctk.CTkEntry(drive_inner, textvariable=variable, height=36,
-                         font=self.font_body).grid(row=6, column=col_no, sticky='ew',
-                                                   padx=(0, 8) if col_no == 0 else (8, 0),
-                                                   pady=(4, 12))
+            entry_widget = ctk.CTkEntry(
+                drive_inner, textvariable=variable, height=36, font=self.font_body
+            )
+            entry_widget.grid(row=6, column=col_no, sticky='ew',
+                              padx=(0, 8) if col_no == 0 else (8, 0),
+                              pady=(4, 12))
+            if col_no == 0:
+                self.drive_source_tab_entry = entry_widget
+            else:
+                self.drive_target_tab_entry = entry_widget
 
         self.drive_month_var = ctk.StringVar(value='September')
         self.drive_year_var = ctk.StringVar(value='2026')
@@ -454,13 +559,14 @@ class App(ctk.CTk):
         ctk.CTkEntry(drive_inner, textvariable=self.drive_year_var, height=36,
                      font=self.font_body).grid(row=8, column=1, sticky='ew',
                                                padx=(8, 0), pady=(4, 12))
+
         self.drive_info_label = ctk.CTkLabel(
             drive_inner,
             text='Cek Data hanya membaca. Impor Baris Baru menulis ke sheet setelah konfirmasi.',
             font=self.font_small, text_color=COLOR_TEXT_MUTED, anchor='w',
             wraplength=650,
         )
-        self.drive_info_label.grid(row=9, column=0, columnspan=2, sticky='ew')
+        self.drive_info_label.grid(row=11, column=0, columnspan=2, sticky='ew')
         self.drive_card.grid_remove()
 
         # ---- run button ----
@@ -569,8 +675,14 @@ class App(ctk.CTk):
 
         if cfg.get('cloud_source'):
             self._active_file_type = None
+            local_mode = cfg.get('local_source', False)
+            default_source = cfg['default_source']
+            if local_mode:
+                local_files = sorted(BASE_DIR.glob(cfg['local_file_glob']),
+                                     key=lambda p: p.stat().st_mtime)
+                default_source = str(local_files[-1]) if local_files else ''
             values = self._cloud_forms.get(name, {
-                'source': cfg['default_source'],
+                'source': default_source,
                 'target': cfg['default_target'],
                 'source_tab': cfg['default_source_tab'],
                 'target_tab': cfg['default_target_tab'],
@@ -584,25 +696,50 @@ class App(ctk.CTk):
             self.drive_year_var.set(values['year'])
             self.drive_month_var.set(values['month'])
             content_mode = cfg.get('content_source', False)
+            bw_content_mode = cfg.get('bw_content', False)
             self.drive_source_label.configure(
-                text='Link sheet sumber LS' if content_mode
+                text='File Excel raw (lokal)' if local_mode
+                else 'Link sheet sumber LS' if content_mode
                 else 'Link sheet raw (file Excel di Drive)'
             )
+            if local_mode:
+                self.drive_browse_button.pack(side='left', padx=(8, 0))
+            else:
+                self.drive_browse_button.pack_forget()
             self.drive_source_tab_label.configure(
-                text='Tab LS sumber' if content_mode else 'Tab raw'
+                text='Tab LS sumber' if content_mode and not local_mode else 'Tab raw'
             )
             self.drive_target_tab_label.configure(
-                text='Tab daftar PAID' if content_mode else 'Tab tujuan'
+                text=('Tab tujuan (otomatis 7 brand)' if bw_content_mode
+                      else 'Tab daftar PAID' if content_mode else 'Tab tujuan')
+            )
+            self.drive_target_tab_entry.configure(
+                state='disabled' if bw_content_mode else 'normal'
             )
             self.drive_month_label.configure(
-                text=(f"Bulan {cfg['date_column']}" if content_mode
+                text=(f"Bulan {cfg['date_column']}"
+                      if content_mode
                       else f"Bulan untuk GMV 0 ({cfg['date_column']})")
             )
             self.drive_info_label.configure(
-                text=('Cek Data hanya membaca. Sinkronkan Content dapat memperbarui GMV '
-                      'serta mengosongkan room ID ganda/salah tab PAID setelah konfirmasi.'
-                      if content_mode else
-                      'Cek Data hanya membaca. Impor Baris Baru menulis ke sheet setelah konfirmasi.')
+                text=(
+                    'Cek Data hanya membaca. Room Date Live bulan terpilih dijumlah GMV-nya '
+                    'jadi 1 baris per room. Kalau ada room yang sudah ada di Content, proses '
+                    'berhenti tanpa menulis. Semua room masuk LS [brand]; creator di '
+                    'PAID KOL (LS) otomatis tampil di LS PAID [brand].'
+                    if bw_content_mode else
+                    'Cek Data hanya membaca. Sinkronkan Content dapat memperbarui GMV '
+                    'serta mengosongkan room ID ganda/salah tab PAID setelah konfirmasi.'
+                    if content_mode else
+                    'Cek Data hanya membaca. Kalau ada baris file yang sudah ada di tab '
+                    'tujuan, file dianggap sudah pernah diimpor dan proses berhenti; '
+                    'selain itu ditulis dari baris kosong paling bawah.'
+                    if cfg.get('append_all_matches') else
+                    'Cek Data hanya membaca. Baris baru ditulis mulai dari baris kosong '
+                    'paling bawah tanpa menggeser atau menimpa data lama.'
+                    if cfg.get('append_bottom') else
+                    'Cek Data hanya membaca. Impor Baris Baru menulis ke sheet setelah konfirmasi.'
+                )
             )
             self._active_cloud_type = name
             self.file_card.grid_remove()
@@ -610,7 +747,8 @@ class App(ctk.CTk):
             self.drive_card.grid()
             self.apply_button.grid()
             self.apply_button.configure(
-                text='Sinkronkan Content' if content_mode else 'Impor Baris Baru'
+                text=('Sinkronkan Content' if content_mode else
+                      'Impor Baris Baru')
             )
             self.run_button.configure(text='Cek Data (baca saja)')
             return
@@ -671,6 +809,14 @@ class App(ctk.CTk):
         )
         if path:
             self.file_var.set(path)
+
+    def _browse_drive_source(self):
+        path = filedialog.askopenfilename(
+            title='Pilih file Excel raw', initialdir=str(BASE_DIR),
+            filetypes=[('Excel files', '*.xlsx')],
+        )
+        if path:
+            self.drive_source_var.set(path)
 
     def _update_brand_label(self):
         cfg = self._current_config()
@@ -798,15 +944,21 @@ class App(ctk.CTk):
         target_link = self.drive_target_var.get().strip()
         source_tab = self.drive_source_tab_var.get().strip()
         target_tab = self.drive_target_tab_var.get().strip()
-        if not source_link or not target_link or not source_tab or not target_tab:
-            self._append_log('ERROR: link raw, link tujuan, dan kedua nama tab wajib diisi.\n')
+        if (not source_link or not target_link or not source_tab or
+                (not target_tab and not cfg.get('bw_content'))):
+            self._append_log('ERROR: link sumber, link tujuan, dan nama tab wajib diisi.\n')
             return
         if not CREDENTIALS_PATH.exists():
             self._append_log(f'ERROR: credentials.json tidak ketemu di {BASE_DIR}\n')
             return
         try:
             module = importlib.import_module(cfg['module'])
-            source_id = module.spreadsheet_id(source_link)
+            if cfg.get('local_source'):
+                if not Path(source_link).is_file():
+                    raise ValueError(f'File Excel tidak ketemu: {source_link}')
+                source_args = ['--source-file', source_link]
+            else:
+                source_args = ['--source-id', module.spreadsheet_id(source_link)]
             target_id = module.spreadsheet_id(target_link)
             year = int(self.drive_year_var.get().strip())
             month = MONTHS.index(self.drive_month_var.get())
@@ -816,25 +968,52 @@ class App(ctk.CTk):
             self._append_log(f'ERROR: {exc}\n')
             return
 
-        confirmation = (
-            'Aplikasi akan mengisi tab Content per brand/PAID, memperbarui total GMV, '
-            'serta mengosongkan baris room ID ganda atau salah tab PAID. Lanjutkan?'
-            if cfg.get('content_source') else
-            f'Aplikasi akan menulis baris baru ke tab "{target_tab}". Lanjutkan?'
-        )
+        if cfg.get('bw_content'):
+            confirmation = (
+                'Aplikasi akan menambah room baru (Date Live bulan terpilih, GMV dijumlah '
+                'per room) ke 7 tab LS [brand]. Creator PAID otomatis tampil di tab '
+                'LS PAID lewat rumus. Kalau ada room yang sudah ada, proses berhenti '
+                'tanpa menulis. Lanjutkan?'
+            )
+        elif cfg.get('content_source'):
+            confirmation = (
+                'Aplikasi akan mengisi tab Content per brand/PAID, memperbarui total GMV, '
+                'serta mengosongkan baris room ID ganda atau salah tab PAID. Lanjutkan?'
+            )
+        elif cfg.get('append_all_matches'):
+            confirmation = (
+                'Aplikasi akan mengisi mulai dari baris kosong paling bawah untuk semua '
+                'GMV serta non-GMV pada bulan terpilih, tanpa menggeser data lama. '
+                'Kalau ada baris yang sudah pernah diimpor, proses berhenti tanpa menulis. '
+                'Lanjutkan?'
+            )
+        elif cfg.get('append_bottom'):
+            confirmation = (
+                'Aplikasi akan menulis baris baru mulai dari baris kosong paling bawah '
+                'tanpa menggeser atau menimpa data lama. Lanjutkan?'
+            )
+        else:
+            confirmation = f'Aplikasi akan menulis baris baru ke tab "{target_tab}". Lanjutkan?'
         if apply and not messagebox.askyesno(
             'Konfirmasi impor ke Google Sheets', confirmation,
         ):
             return
 
-        tab_argument = '--paid-tab' if cfg.get('content_source') else '--target-tab'
         command = [
             sys.executable, '-u', str(BASE_DIR / cfg['script']),
-            '--source-id', source_id, '--target-id', target_id,
-            '--source-tab', source_tab, tab_argument, target_tab,
+            *source_args, '--target-id', target_id,
+            '--source-tab', source_tab,
             '--year', str(year), '--month', str(month),
             '--credentials', str(CREDENTIALS_PATH),
         ]
+        # Content BW writes its 7 brand tabs itself; PAID comes from sheet formulas.
+        if not cfg.get('content_source'):
+            command.extend(['--target-tab', target_tab])
+        elif not cfg.get('bw_content'):
+            command.extend(['--paid-tab', target_tab])
+        if cfg.get('bw_content'):
+            # A live still running at export has no End; write it with Stop Hour empty.
+            command.append('--allow-missing-time')
         if cfg.get('repair_paid_routing'):
             command.append('--repair-paid-routing')
         if apply:

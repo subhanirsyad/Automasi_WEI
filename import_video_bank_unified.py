@@ -1,8 +1,8 @@
 """
-IMPORT VIDEO BANK - UNIFIED (Ellips & Cussons, TAP_SV & SC_SV)
+IMPORT VIDEO BANK - UNIFIED (Ellips, Cussons & NPURE, TAP_SV & SC_SV)
 ================================================================================
 Satu script buat semua kombinasi:
-  - Target: ELLIPS atau CUSSONS (dideteksi dari TARGET_SPREADSHEET_ID)
+  - Target: ELLIPS, CUSSONS, atau NPURE (dideteksi dari TARGET_SPREADSHEET_ID)
   - Sumber: TAP (TAP_SV) atau SC (SC_SV) (dideteksi dari nama file / isinya)
 
 CARA PAKAI:
@@ -17,6 +17,7 @@ import datetime
 from pathlib import Path
 
 import openpyxl
+import npure_rules
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -24,19 +25,32 @@ from googleapiclient.errors import HttpError
 # ============== KONFIGURASI -- ISI INI ==============
 CREDENTIALS_FILE = 'credentials.json'
 
-TARGET_SPREADSHEET_ID = ''  # Cussons
-# TARGET_SPREADSHEET_ID = ''  # Ellips
+# TARGET_SPREADSHEET_ID = '1ZBOvn5fReBECSzgXrAS6SNuq7tWDaem9Cf_QhQN4b_8'  # Cussons
+# TARGET_SPREADSHEET_ID = '1DDTEyL4L1Pyn72PejKN0_rZauyYz9Tjf1-XCD77QE_Q'  # NPURE
+TARGET_SPREADSHEET_ID = '1tIG9FhUogXwBJK6YuzpT19nFlJs5EDfXA6EYQ493paE'  # Ellips
 
-SOURCE_XLSX_PATH = r''
-SOURCE_SHEET_NAME = ''
+SOURCE_XLSX_PATH = r'C:\Users\Subhan\OneDrive\Documents\Automasi\TAP_SV Ellips (1-23 September).xlsx'
+SOURCE_SHEET_NAME = 'Custom report'
 
 FILTER_YEAR = 2026
-FILTER_MONTH = 8  # 8 = Agustus. Set None kalau mau semua bulan.
+FILTER_MONTH = 9  # 9 = September. Set None kalau mau semua bulan.
 # ======================================================
 
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 
-# ---------- PROFIL TARGET (Ellips vs Cussons) ----------
+def cussons_cek_formula(cols, r, rec):
+    return f"=COUNTIF({cols['videoid']}:{cols['videoid']};{cols['videoid']}{r})"
+
+
+def npure_cek_formula(cols, r, rec):
+    """Cek Database: VLOOKUP creator ke roster bulan video diupload."""
+    today = datetime.date.today()
+    ym = extract_year_month(rec['post_time']) or (today.year, today.month)
+    roster = npure_rules.roster_name(*ym).replace("'", "''")
+    return f"=VLOOKUP({cols['creator']}{r};'{roster}'!$B:$B;1;0)"
+
+
+# ---------- PROFIL TARGET (Ellips, Cussons, NPURE) ----------
 # Kolom VIDEO BANK beda antar client -- ELLIPS gak punya kolom "Cek"/"Product ID"
 # terpisah, CUSSONS punya. Semua ini di-drive dari profil, bukan hardcode di logic.
 TARGET_PROFILES = {
@@ -49,8 +63,8 @@ TARGET_PROFILES = {
         },
         'has_cek_col': False,
         'has_product_id_col': False,
-        'roster_sheet': None,   # Ellips: roster cuma dipakai utk sumber SC, diisi manual per-run
-        'roster_col': None,
+        'sc_roster_filter': False,  # sumber SC diambil semua, tanpa filter roster
+        'sync_roster': True,
     },
     '1ZBOvn5fReBECSzgXrAS6SNuq7tWDaem9Cf_QhQN4b_8': {
         'name': 'CUSSONS',
@@ -62,8 +76,27 @@ TARGET_PROFILES = {
         },
         'has_cek_col': True,
         'has_product_id_col': True,
-        'roster_sheet': "Creator Performance PZ Cussons August'26",
-        'roster_col': 'B',
+        # sumber SC cuma ambil creator yang ada di roster bulan video itu diupload
+        # (tab dari roster_sheet_name, mis. "Creator Performance PZ Cussons September'26")
+        'sc_roster_filter': True,
+        'sync_roster': True,
+        'cek_formula': cussons_cek_formula,
+    },
+    npure_rules.SPREADSHEET_ID: {
+        'name': 'NPURE',
+        'video_bank_sheet': 'VIDEO BANK',
+        # D = Cek Database (VLOOKUP roster bulan upload), L = PID, M = Product. Kolom N (GMV) gak diisi.
+        'cols': {
+            'creator': 'B', 'cek': 'D', 'videoid': 'E', 'link': 'F', 'count': 'G',
+            'uploaddate': 'H', 'day': 'I', 'month': 'J', 'year': 'K',
+            'productid': 'L', 'product': 'M',
+        },
+        'has_cek_col': True,
+        'has_product_id_col': True,
+        'product_with_id': False,  # kolom Product = nama polos, ID-nya di kolom PID
+        'sc_roster_filter': False,  # sumber SC diambil semua; yang bukan roster keliatan di Cek Database
+        'sync_roster': True,
+        'cek_formula': npure_cek_formula,
     },
 }
 
@@ -163,14 +196,15 @@ def extract_product_id_from_text(text):
     return m.group(1) if m else ''
 
 
-def get_creator_roster(service, profile):
-    """Cuma dipakai kalo source_type == SC dan profile.roster_sheet keisi."""
-    if not profile['roster_sheet']:
-        raise ValueError('Sumber SC butuh roster, tapi profil target ini gak punya roster_sheet.')
-    result = service.spreadsheets().values().get(
-        spreadsheetId=TARGET_SPREADSHEET_ID,
-        range=f"'{profile['roster_sheet']}'!{profile['roster_col']}1:{profile['roster_col']}5000"
-    ).execute()
+def get_creator_roster(service, sheet_name):
+    """Cuma dipakai kalo source_type == SC dan profile.sc_roster_filter aktif."""
+    try:
+        result = service.spreadsheets().values().get(
+            spreadsheetId=TARGET_SPREADSHEET_ID,
+            range=f"'{sheet_name}'!B1:B5000"
+        ).execute()
+    except HttpError as e:
+        raise ValueError(f'Tab roster "{sheet_name}" tidak ketemu / gagal dibaca: {e}')
     values = result.get('values', [])
     roster = set()
     for row in values:
@@ -193,9 +227,12 @@ MONTH_NAME_EN = {
 
 def roster_sheet_name(brand, year, month):
     """Nama tab roster creator per bulan -- beda pattern per brand.
-    ELLIPS: 'GMV Creator [AGUS]' / CUSSONS: "Creator Performance PZ Cussons August'26"."""
+    ELLIPS: 'GMV Creator [AGUS]' / CUSSONS: "Creator Performance PZ Cussons August'26"
+    / NPURE: 'Creator Performance-August'."""
     if brand == 'ELLIPS':
         return f'GMV Creator [{MONTH_ABBR_ID[month]}]'
+    if brand == 'NPURE':
+        return npure_rules.roster_name(year, month)
     return f"Creator Performance PZ Cussons {MONTH_NAME_EN[month]}'{str(year)[-2:]}"
 
 
@@ -237,6 +274,7 @@ def sync_creator_roster(service, spreadsheet_id, sheet_name, creator_names):
         return
 
     start_row = last_filled + 1
+    ensure_enough_rows(service, spreadsheet_id, sheet_name, start_row + len(missing) - 1)
     data = [{'range': f"'{sheet_name}'!{col}{start_row + i}", 'values': [[name]]}
             for i, name in enumerate(missing)]
     service.spreadsheets().values().batchUpdate(
@@ -292,7 +330,7 @@ def read_tap_sv(path):
         video_id_raw = row[i_videoid]
         if not video_id_raw or video_id_raw == '-':
             continue
-        video_id = str(video_id_raw).strip()
+        video_id = clean_id(video_id_raw)
         if video_id in seen:
             dup_in_source += 1
             continue
@@ -366,7 +404,7 @@ def read_sc_sv(path):
         video_id_raw = row[i_videoid]
         if not video_id_raw or video_id_raw == '-':
             continue
-        video_id = str(video_id_raw).strip()
+        video_id = clean_id(video_id_raw)
         if video_id in seen:
             dup_in_source += 1
             continue
@@ -400,42 +438,109 @@ def read_sc_sv(path):
     return records, dup_in_source, filtered_out_month
 
 
+def clean_id(v):
+    """Video ID dari file sumber -> string digit. int dari xlsx aman di-str();
+    string dibersihin dari spasi & prefix '."""
+    if isinstance(v, int):
+        return str(v)
+    return str(v).strip().lstrip("'").strip()
+
+
+def id_exact(v):
+    """Video ID sebagai string digit utuh, atau None kalau udah jadi angka (presisi hilang)."""
+    if isinstance(v, str):
+        s = v.strip().lstrip("'").strip()
+        return s if s.isdigit() else None
+    return None
+
+
+def id_approx(v):
+    """Kunci 15 digit signifikan. Video ID 19 digit yang dulu ketulis sebagai ANGKA di
+    Sheets cuma nyisa ~15 digit depan (sisanya jadi 0), jadi exact match pasti gagal.
+    Dua video beda yang 15 digit depannya sama praktis gak mungkin (beda < 10.000)."""
+    try:
+        if isinstance(v, str):
+            s = v.strip().lstrip("'").strip()
+            if not s.isdigit():
+                return None
+            v = s
+        return f'{float(v):.14e}'
+    except (TypeError, ValueError):
+        return None
+
+
+class ExistingIds:
+    """Video ID yang udah ada di sheet: cocok exact (ID teks) atau lewat 15 digit
+    depan (ID lama yang udah kesimpen jadi angka)."""
+
+    def __init__(self):
+        self.exact = set()
+        self.approx = set()
+        self.numeric_count = 0  # berapa ID di sheet yang kesimpen sebagai angka
+
+    def add(self, v):
+        ex = id_exact(v)
+        if ex:
+            self.exact.add(ex)
+        else:
+            self.numeric_count += 1
+        ap = id_approx(v)
+        if ap:
+            self.approx.add(ap)
+
+    def match(self, vid):
+        """'exact' / 'approx' / None."""
+        if vid in self.exact:
+            return 'exact'
+        if id_approx(vid) in self.approx:
+            return 'approx'
+        return None
+
+    def __len__(self):
+        return len(self.exact) + self.numeric_count
+
+
 def get_existing_video_ids(service, profile):
     col = profile['cols']['videoid']
     sheet = profile['video_bank_sheet']
+    # UNFORMATTED biar ID yang kesimpen sebagai angka kebaca angka mentahnya,
+    # bukan teks tampilan kayak "7.68056E+18".
     result = service.spreadsheets().values().get(
         spreadsheetId=TARGET_SPREADSHEET_ID,
-        range=f"'{sheet}'!{col}:{col}"
+        range=f"'{sheet}'!{col}:{col}",
+        valueRenderOption='UNFORMATTED_VALUE'
     ).execute()
     values = result.get('values', [])
 
+    # kalau ada beberapa baris berlabel "Video ID" berurutan, ambil yang paling bawah
     header_row = None
     for i, row in enumerate(values):
-        if row and row[0] == 'Video ID':
+        v = row[0] if row else None
+        if v == 'Video ID':
             header_row = i
+        elif header_row is not None and v not in (None, ''):
             break
     if header_row is None:
         raise ValueError(f'Header "Video ID" tidak ketemu di kolom {col} sheet "{sheet}".')
 
     data_start = header_row + 1
-    existing_ids = set()
+    existing = ExistingIds()
     last_filled = data_start - 1
     for i in range(data_start, len(values)):
         vid = values[i][0] if values[i] else None
-        if vid:
-            existing_ids.add(str(vid).strip())
+        if vid not in (None, ''):
+            existing.add(vid)
             last_filled = i
 
-    return existing_ids, data_start + 1, last_filled + 2
+    return existing, data_start + 1, last_filled + 2
 
 
-def ensure_enough_rows(service, profile, needed_last_row):
+def ensure_enough_rows(service, spreadsheet_id, sheet_name, needed_last_row):
     """Grid sheet punya batas rowCount tetap -- kalau baris yang mau ditulis
     lewat batas itu, batchUpdate values bakal error 'exceeds grid limits'.
     Perbesar grid-nya dulu kalau perlu."""
-    sheet_name = profile['video_bank_sheet']
     meta = service.spreadsheets().get(
-        spreadsheetId=TARGET_SPREADSHEET_ID,
+        spreadsheetId=spreadsheet_id,
         fields='sheets(properties(sheetId,title,gridProperties(rowCount)))'
     ).execute()
     target = next((sh['properties'] for sh in meta.get('sheets', [])
@@ -447,7 +552,7 @@ def ensure_enough_rows(service, profile, needed_last_row):
     if needed_last_row > current_rows:
         add_rows = needed_last_row - current_rows + 500
         service.spreadsheets().batchUpdate(
-            spreadsheetId=TARGET_SPREADSHEET_ID,
+            spreadsheetId=spreadsheet_id,
             body={'requests': [{
                 'appendDimension': {
                     'sheetId': target['sheetId'],
@@ -467,13 +572,15 @@ def write_new_records(service, profile, to_insert, next_row):
     for idx, rec in enumerate(to_insert):
         r = next_row + idx
         value_ranges.append({'range': f"{sheet_ref}{cols['creator']}{r}", 'values': [[rec['creator']]]})
-        value_ranges.append({'range': f"{sheet_ref}{cols['videoid']}{r}", 'values': [[rec['video_id']]]})
+        # prefix ' biar Sheets nyimpen sebagai TEKS -- kalau jadi angka, ID 19 digit
+        # kepotong presisinya dan pengecekan duplikat berikutnya gagal
+        value_ranges.append({'range': f"{sheet_ref}{cols['videoid']}{r}", 'values': [["'" + rec['video_id']]]})
         value_ranges.append({'range': f"{sheet_ref}{cols['uploaddate']}{r}", 'values': [[to_serial_date(rec['post_time'])]]})
 
         if profile['has_product_id_col']:
             pid = rec['product_id'] or extract_product_id_from_text(rec['product'])
             if rec['product']:
-                product_text = f"{rec['product']}({pid})" if pid else rec['product']
+                product_text = f"{rec['product']}({pid})" if pid and profile.get('product_with_id', True) else rec['product']
             else:
                 product_text = ''
             value_ranges.append({'range': f"{sheet_ref}{cols['product']}{r}", 'values': [[product_text]]})
@@ -491,7 +598,7 @@ def write_new_records(service, profile, to_insert, next_row):
         value_ranges.append({'range': f"{sheet_ref}{cols['year']}{r}", 'values': [[f"=IF(${cols['uploaddate']}{r}=\"\";\"\";YEAR(${cols['uploaddate']}{r}))"]]})
 
         if profile['has_cek_col']:
-            value_ranges.append({'range': f"{sheet_ref}{cols['cek']}{r}", 'values': [[f"=COUNTIF({cols['videoid']}:{cols['videoid']};{cols['videoid']}{r})"]]})
+            value_ranges.append({'range': f"{sheet_ref}{cols['cek']}{r}", 'values': [[profile['cek_formula'](cols, r, rec)]]})
 
     entries_per_row = len(value_ranges) // len(to_insert) if to_insert else 0
     chunk_rows = 700
@@ -502,7 +609,8 @@ def write_new_records(service, profile, to_insert, next_row):
             spreadsheetId=TARGET_SPREADSHEET_ID,
             body={'valueInputOption': 'USER_ENTERED', 'data': chunk}
         ).execute()
-        print(f'  ... tertulis {start + n}/{len(to_insert)} baris')
+        print(f'Tertulis {start + n}/{len(to_insert)} baris baru '
+              f'(baris {next_row + start}-{next_row + start + n - 1}).')
 
 
 def main():
@@ -525,51 +633,69 @@ def main():
 
     service = get_sheets_service()
 
-    roster = None
+    # {(tahun, bulan): set creator} -- roster diambil per bulan upload video
+    rosters = None
     if source_type == 'SC':
-        if not profile['roster_sheet']:
-            print('PERINGATAN: sumber SC tapi target ini gak punya roster_sheet, semua video diambil tanpa filter roster.')
+        if not profile['sc_roster_filter']:
+            print('PERINGATAN: sumber SC tapi filter roster target ini nonaktif, semua video diambil tanpa filter roster.')
         else:
-            roster = get_creator_roster(service, profile)
-            print(f'Ada {len(roster)} creator di roster {profile["roster_sheet"]}.')
+            rosters = {}
+            months = {ym for r in records if (ym := extract_year_month(r['post_time']))}
+            for year, month in sorted(months):
+                sheet_name = roster_sheet_name(profile['name'], year, month)
+                rosters[(year, month)] = get_creator_roster(service, sheet_name)
+                print(f'Ada {len(rosters[(year, month)])} creator di roster "{sheet_name}".')
+
+    if source_type == 'TAP' and profile['sync_roster']:
+        # Roster dulu, sebelum nulis data: kalau tab roster bulan itu belum ada, script
+        # berhenti di sini. Dicek dari SEMUA creator di file (bukan cuma video baru)
+        # biar creator dari baris yang udah pernah diinput tetap masuk roster pas re-run.
+        print('Sinkronisasi roster creator (khusus sumber TAP)...')
+        sync_roster_from_records(
+            service, TARGET_SPREADSHEET_ID, profile['name'],
+            [(r['creator'], r['post_time']) for r in records]
+        )
 
     print('Ambil Video ID yang udah ada di VIDEO BANK...')
     existing_ids, data_start_sheet_row, next_row = get_existing_video_ids(service, profile)
     print(f'Ada {len(existing_ids)} Video ID yang udah ada di sheet.')
+    if existing_ids.numeric_count:
+        print(f'  PERHATIAN: {existing_ids.numeric_count} di antaranya kesimpen sebagai ANGKA '
+              '(digit belakang udah hilang) -- dicocokkan lewat 15 digit depan.')
 
     not_in_roster = 0
+    approx_matched = 0
     to_insert = []
     for r in records:
-        if r['video_id'] in existing_ids:
+        m = existing_ids.match(r['video_id'])
+        if m is not None:
+            approx_matched += m == 'approx'
             continue
-        if roster is not None and r['creator'].strip().lower() not in roster:
-            not_in_roster += 1
-            continue
+        if rosters is not None:
+            roster = rosters.get(extract_year_month(r['post_time']), set())
+            if r['creator'].strip().lower() not in roster:
+                not_in_roster += 1
+                continue
         to_insert.append(r)
 
     already_exists = len(records) - len(to_insert) - not_in_roster
+    if approx_matched:
+        print(f'{approx_matched} video dianggap sudah ada lewat cocok 15 digit depan (ID lama berbentuk angka).')
 
     if not to_insert:
         msg = f'\nTidak ada video baru. ({already_exists} sudah ada di sheet'
-        if roster is not None:
+        if rosters is not None:
             msg += f', {not_in_roster} creator-nya bukan roster'
         msg += ')'
         print(msg)
         return
 
     print(f'\n{len(to_insert)} video baru akan ditambahkan ke baris {next_row}-{next_row + len(to_insert) - 1}.')
-    extra = f', {not_in_roster} dilewati karena bukan roster' if roster is not None else ''
+    extra = f', {not_in_roster} dilewati karena bukan roster' if rosters is not None else ''
     print(f'{already_exists} dilewati karena sudah ada di sheet{extra}.')
-    ensure_enough_rows(service, profile, next_row + len(to_insert) - 1)
+    ensure_enough_rows(service, TARGET_SPREADSHEET_ID, profile['video_bank_sheet'], next_row + len(to_insert) - 1)
     print('Menulis ke Google Sheets...')
     write_new_records(service, profile, to_insert, next_row)
-
-    if source_type == 'TAP':
-        print('\nSinkronisasi roster creator (khusus sumber TAP)...')
-        sync_roster_from_records(
-            service, TARGET_SPREADSHEET_ID, profile['name'],
-            [(r['creator'], r['post_time']) for r in to_insert]
-        )
 
     print(f'\nSELESAI. {len(to_insert)} video baru ditambahkan.')
 

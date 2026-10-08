@@ -1,11 +1,16 @@
 """
-IMPORT LIVE STREAMING - UNIFIED (Ellips & Cussons)
+IMPORT LIVE STREAMING - UNIFIED (Ellips, Cussons & NPURE)
 ================================================================================
 Satu script buat kedua client. Mapping kolom LIVE STREAMING-nya SAMA PERSIS
 antara Ellips & Cussons (B=Creator, D=Room ID, E=Count formula, F=Live Date,
 J/K/L=Date/Month/Year formula) -- bedanya cuma nama tab & Cussons punya kolom
 "Cek" (C) tambahan yang VLOOKUP ke roster creator, TAPI itu formula otomatis,
 script gak perlu nulis situ.
+
+NPURE: tab "Live Streaming" (header baris 76), kolom sama + C "cek" (VLOOKUP ke
+"Creator Performance-<Bulan>", ditulis script karena baris baru kosong) + M "GMV"
+(cuma GMV yang diisi, Views/Like/dst gak ada di tab itu). Creator baru otomatis
+ditambah ke roster kayak brand lain; tab roster bulan Live Date-nya harus udah ada.
 
 ELLIPS juga diisi kolom Views / Like / Comment / GMV / Product (lihat METRICS)
 -- posisi kolomnya dicari dari nama header di tab, bukan huruf yang di-hardcode.
@@ -21,6 +26,7 @@ import datetime
 from pathlib import Path
 
 import openpyxl
+import npure_rules
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -28,14 +34,15 @@ from googleapiclient.errors import HttpError
 # ============== KONFIGURASI -- ISI INI ==============
 CREDENTIALS_FILE = 'credentials.json'
 
-TARGET_SPREADSHEET_ID = ''  # Cussons
-# TARGET_SPREADSHEET_ID = ''  # Ellips
+# TARGET_SPREADSHEET_ID = '1ZBOvn5fReBECSzgXrAS6SNuq7tWDaem9Cf_QhQN4b_8'  # Cussons
+# TARGET_SPREADSHEET_ID = '1DDTEyL4L1Pyn72PejKN0_rZauyYz9Tjf1-XCD77QE_Q'  # NPURE
+TARGET_SPREADSHEET_ID = '1tIG9FhUogXwBJK6YuzpT19nFlJs5EDfXA6EYQ493paE'  # Ellips
 
-SOURCE_XLSX_PATH = r'C:\Users\Subhan\OneDrive\Documents\Automasi\TAP_LS Cussons (1-30 August).xlsx'
+SOURCE_XLSX_PATH = r'C:\Users\Subhan\OneDrive\Documents\Automasi\TAP_LS Ellips (1-23 September).xlsx'
 SOURCE_SHEET_NAME = 'Custom report'
 
 FILTER_YEAR = 2026
-FILTER_MONTH = 8  # 8 = Agustus. Set None kalau mau semua bulan.
+FILTER_MONTH = 9  # 9 = September. Set None kalau mau semua bulan.
 # ======================================================
 
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
@@ -52,6 +59,15 @@ TARGET_PROFILES = {
         'sheet': 'LIVE STREAMING',
         'has_live_start_end': True,  # G=Live Start, H=End, I=Duration
         'extra_metrics': False,
+    },
+    npure_rules.SPREADSHEET_ID: {
+        'name': 'NPURE',
+        'sheet': 'Live Streaming',
+        'has_live_start_end': True,
+        'extra_metrics': True,
+        'metrics': ('gmv',),  # tab NPURE cuma punya kolom GMV (Views/Like/dst gak ada)
+        'cek_col': 'C',  # VLOOKUP creator ke roster bulan Live Date (baris baru kosong, jadi ditulis di sini)
+        'date_pattern': 'dd"-"mm"-"yyyy',
     },
 }
 
@@ -75,6 +91,9 @@ METRICS = {
     'product': (['product', 'products', 'produk', 'product name'],
                 ['Product name', 'Products', 'Product'], 'list'),
 }
+# Metrik yang boleh gak ada di file sumber (export TikTok kadang gak nyertain) --
+# kalau gak ketemu, kolomnya dikosongin aja, script gak berhenti.
+OPTIONAL_METRICS = {'comments'}
 
 # Mapping kolom -- sama untuk semua target (kalau ada client baru dgn mapping
 # beda, tinggal tambah override per-profile di sini).
@@ -191,10 +210,12 @@ def resolve_source_metric_cols(header):
     cols, missing = {}, []
     for key, (_, src_names, _) in METRICS.items():
         idx = next((by_norm[normalize_header(n)] for n in src_names if normalize_header(n) in by_norm), None)
-        if idx is None:
-            missing.append(' / '.join(src_names))
-        else:
+        if idx is not None:
             cols[key] = idx
+        elif key in OPTIONAL_METRICS:
+            print(f'  Catatan: kolom "{" / ".join(src_names)}" gak ada di file sumber -- {key} dikosongin.')
+        else:
+            missing.append(' / '.join(src_names))
     if missing:
         raise ValueError(
             f'Kolom metrik berikut tidak ketemu di file sumber: {"; ".join(missing)}.\n'
@@ -317,9 +338,12 @@ MONTH_NAME_EN = {
 
 def roster_sheet_name(brand, year, month):
     """Nama tab roster creator per bulan -- beda pattern per brand.
-    ELLIPS: 'GMV Creator [AGUS]' / CUSSONS: "Creator Performance PZ Cussons August'26"."""
+    ELLIPS: 'GMV Creator [AGUS]' / CUSSONS: "Creator Performance PZ Cussons August'26"
+    / NPURE: 'Creator Performance-August'."""
     if brand == 'ELLIPS':
         return f'GMV Creator [{MONTH_ABBR_ID[month]}]'
+    if brand == 'NPURE':
+        return npure_rules.roster_name(year, month)
     return f"Creator Performance PZ Cussons {MONTH_NAME_EN[month]}'{str(year)[-2:]}"
 
 
@@ -361,6 +385,7 @@ def sync_creator_roster(service, spreadsheet_id, sheet_name, creator_names):
         return
 
     start_row = last_filled + 1
+    ensure_enough_rows(service, spreadsheet_id, sheet_name, start_row + len(missing) - 1)
     data = [{'range': f"'{sheet_name}'!{col}{start_row + i}", 'values': [[name]]}
             for i, name in enumerate(missing)]
     service.spreadsheets().values().batchUpdate(
@@ -386,32 +411,94 @@ def sync_roster_from_records(service, spreadsheet_id, brand, records_with_date):
         sync_creator_roster(service, spreadsheet_id, sheet_name, creators)
 
 
+def room_id_exact(v):
+    """Room ID sebagai string digit utuh, atau None kalau udah jadi angka (presisi hilang)."""
+    if isinstance(v, str):
+        s = v.strip().lstrip("'").strip()
+        return s if s.isdigit() else None
+    return None
+
+
+def room_id_approx(v):
+    """Kunci 15 digit signifikan. Room ID 19 digit yang dulu ketulis sebagai ANGKA di
+    Sheets cuma nyisa ~15 digit depan (sisanya jadi 0), jadi exact match pasti gagal.
+    Dua room beda yang 15 digit depannya sama praktis gak mungkin (beda < 10.000)."""
+    try:
+        if isinstance(v, str):
+            s = v.strip().lstrip("'").strip()
+            if not s.isdigit():
+                return None
+            v = s
+        return f'{float(v):.14e}'
+    except (TypeError, ValueError):
+        return None
+
+
+class ExistingRoomIds:
+    """Room ID yang udah ada di sheet: cocok exact (ID teks) atau lewat 15 digit
+    depan (ID lama yang udah kesimpen jadi angka)."""
+
+    def __init__(self):
+        self.exact = set()
+        self.approx = set()
+        self.numeric_count = 0  # berapa ID di sheet yang kesimpen sebagai angka
+
+    def add(self, v):
+        ex = room_id_exact(v)
+        if ex:
+            self.exact.add(ex)
+        else:
+            self.numeric_count += 1
+        ap = room_id_approx(v)
+        if ap:
+            self.approx.add(ap)
+
+    def match(self, room_id):
+        """'exact' / 'approx' / None."""
+        if room_id in self.exact:
+            return 'exact'
+        if room_id_approx(room_id) in self.approx:
+            return 'approx'
+        return None
+
+    def __len__(self):
+        return len(self.exact) + self.numeric_count
+
+
 def get_existing_room_ids(service, profile):
     sheet = profile['sheet']
+    # UNFORMATTED biar ID yang kesimpen sebagai angka kebaca angka mentahnya,
+    # bukan teks tampilan kayak "7.68056E+18".
     result = service.spreadsheets().values().get(
         spreadsheetId=TARGET_SPREADSHEET_ID,
-        range=f"'{sheet}'!{COLS['roomid']}:{COLS['roomid']}"
+        range=f"'{sheet}'!{COLS['roomid']}:{COLS['roomid']}",
+        valueRenderOption='UNFORMATTED_VALUE'
     ).execute()
     values = result.get('values', [])
 
+    # Tab bisa punya lebih dari 1 baris berlabel "Live Room ID" berurutan (mis. baris
+    # ringkasan di atas header asli, kayak Ellips baris 75 & 76) -- ambil yang PALING
+    # BAWAH sebelum data mulai, karena header metrik (views/GMV/...) ada di situ.
     header_row = None
     for i, row in enumerate(values):
-        if row and row[0] == 'Live Room ID':
+        v = row[0] if row else None
+        if v == 'Live Room ID':
             header_row = i
+        elif header_row is not None and v not in (None, ''):
             break
     if header_row is None:
         raise ValueError(f'Header "Live Room ID" tidak ketemu di kolom {COLS["roomid"]} sheet "{sheet}".')
 
     data_start = header_row + 1
-    existing_ids = set()
+    existing = ExistingRoomIds()
     last_filled = data_start - 1
     for i in range(data_start, len(values)):
         rid = values[i][0] if values[i] else None
-        if rid:
-            existing_ids.add(str(rid).strip())
+        if rid not in (None, ''):
+            existing.add(rid)
             last_filled = i
 
-    return existing_ids, data_start + 1, last_filled + 2
+    return existing, data_start + 1, last_filled + 2
 
 
 def num_to_col_letter(n):
@@ -435,11 +522,13 @@ def get_metric_target_cols(service, profile, header_row_num):
 
     cols, missing = {}, []
     for key, (target_names, _, _) in METRICS.items():
+        if key not in profile.get('metrics', METRICS):
+            continue
         idx = next((by_norm[n] for n in target_names if n in by_norm), None)
-        if idx is None:
-            missing.append(' / '.join(target_names))
-        else:
+        if idx is not None:
             cols[key] = num_to_col_letter(idx + 1)
+        elif key not in OPTIONAL_METRICS:
+            missing.append(' / '.join(target_names))
     if missing:
         raise ValueError(
             f'Header kolom berikut tidak ketemu di baris {header_row_num} tab "{sheet}": {"; ".join(missing)}.\n'
@@ -473,6 +562,35 @@ def get_sheet_id(service, sheet_name):
     raise ValueError(f'Sheet "{sheet_name}" tidak ketemu.')
 
 
+def ensure_enough_rows(service, spreadsheet_id, sheet_name, needed_last_row):
+    """Grid sheet punya batas rowCount tetap -- kalau baris yang mau ditulis
+    lewat batas itu, batchUpdate values bakal error 'exceeds grid limits'.
+    Perbesar grid-nya dulu kalau perlu."""
+    meta = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        fields='sheets(properties(sheetId,title,gridProperties(rowCount)))'
+    ).execute()
+    target = next((sh['properties'] for sh in meta.get('sheets', [])
+                   if sh['properties']['title'] == sheet_name), None)
+    if target is None:
+        raise ValueError(f'Sheet "{sheet_name}" tidak ketemu waktu cek ukuran grid.')
+
+    current_rows = target['gridProperties']['rowCount']
+    if needed_last_row > current_rows:
+        add_rows = needed_last_row - current_rows + 500
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={'requests': [{
+                'appendDimension': {
+                    'sheetId': target['sheetId'],
+                    'dimension': 'ROWS',
+                    'length': add_rows,
+                }
+            }]}
+        ).execute()
+        print(f'  Grid sheet "{sheet_name}" cuma {current_rows} baris, ditambah {add_rows} baris jadi {current_rows + add_rows}.')
+
+
 def col_letter_to_num(letters):
     n = 0
     for c in letters:
@@ -497,7 +615,7 @@ def ensure_date_time_formats(service, profile, next_row, last_row):
             }
         })
 
-    fmt_request(COLS['livedate'], 'DATE', 'yyyy-mm-dd')
+    fmt_request(COLS['livedate'], 'DATE', profile.get('date_pattern', 'yyyy-mm-dd'))
     if profile['has_live_start_end']:
         fmt_request(COLS['livestart'], 'TIME', 'hh:mm:ss')
         fmt_request(COLS['liveend'], 'TIME', 'hh:mm:ss')
@@ -515,12 +633,20 @@ def write_new_records(service, profile, to_insert, next_row, metric_target_cols)
         for key, col in metric_target_cols.items():
             value_ranges.append({'range': f"{sheet_ref}{col}{r}", 'values': [[rec['metrics'].get(key, '')]]})
         value_ranges.append({'range': f"{sheet_ref}{COLS['creator']}{r}", 'values': [[rec['creator']]]})
-        value_ranges.append({'range': f"{sheet_ref}{COLS['roomid']}{r}", 'values': [[rec['room_id']]]})
+        # prefix ' biar Sheets nyimpen sebagai TEKS -- kalau jadi angka, ID 19 digit
+        # kepotong presisinya dan pengecekan duplikat berikutnya gagal
+        value_ranges.append({'range': f"{sheet_ref}{COLS['roomid']}{r}", 'values': [["'" + rec['room_id']]]})
         value_ranges.append({'range': f"{sheet_ref}{COLS['livedate']}{r}", 'values': [[to_serial_date(rec['live_date'])]]})
         value_ranges.append({'range': f"{sheet_ref}{COLS['count']}{r}", 'values': [[f"=IF({COLS['roomid']}{r}=\"\";0;1)"]]})
         value_ranges.append({'range': f"{sheet_ref}{COLS['day']}{r}", 'values': [[f"=IF(${COLS['livedate']}{r}=\"\";\"\";DAY(${COLS['livedate']}{r}))"]]})
         value_ranges.append({'range': f"{sheet_ref}{COLS['month']}{r}", 'values': [[f"=IF(${COLS['livedate']}{r}=\"\";\"\";MONTH(${COLS['livedate']}{r}))"]]})
         value_ranges.append({'range': f"{sheet_ref}{COLS['year']}{r}", 'values': [[f"=IF(${COLS['livedate']}{r}=\"\";\"\";YEAR(${COLS['livedate']}{r}))"]]})
+        if profile.get('cek_col'):
+            today = datetime.date.today()
+            ym = extract_year_month(rec['live_date']) or (today.year, today.month)
+            roster = roster_sheet_name(profile['name'], *ym).replace("'", "''")
+            value_ranges.append({'range': f"{sheet_ref}{profile['cek_col']}{r}",
+                                 'values': [[f"=VLOOKUP({COLS['creator']}{r};'{roster}'!$B:$B;1;0)"]]})
 
         if profile['has_live_start_end']:
             value_ranges.append({'range': f"{sheet_ref}{COLS['livestart']}{r}", 'values': [[time_fraction(rec.get('live_start_dt'))]]})
@@ -536,7 +662,8 @@ def write_new_records(service, profile, to_insert, next_row, metric_target_cols)
             spreadsheetId=TARGET_SPREADSHEET_ID,
             body={'valueInputOption': 'USER_ENTERED', 'data': chunk}
         ).execute()
-        print(f'  ... tertulis {start + n}/{len(to_insert)} baris')
+        print(f'Tertulis {start + n}/{len(to_insert)} baris baru '
+              f'(baris {next_row + start}-{next_row + start + n - 1}).')
 
     ensure_date_time_formats(service, profile, next_row, next_row + len(to_insert) - 1)
 
@@ -555,18 +682,42 @@ def main():
     if FILTER_MONTH is not None:
         print(f'Filter bulan aktif ({FILTER_MONTH}/{FILTER_YEAR}): {filtered_out_month} livestream di luar bulan itu dilewati.')
 
-    print('Connect ke Google Sheets, ambil Live Room ID yang udah ada...')
+    print('Connect ke Google Sheets...')
     service = get_sheets_service()
+
+    # Roster dulu, sebelum nulis data: kalau tab roster bulan itu belum ada, script
+    # berhenti di sini. Dicek dari SEMUA creator di file (bukan cuma livestream baru)
+    # biar creator dari baris yang udah pernah diinput tetap masuk roster pas re-run.
+    if profile.get('sync_roster', True):
+        print('\nSinkronisasi roster creator (khusus sumber TAP)...')
+        sync_roster_from_records(
+            service, TARGET_SPREADSHEET_ID, profile['name'],
+            [(r['creator'], r['live_date']) for r in records]
+        )
+
+    print('\nAmbil Live Room ID yang udah ada...')
     existing_ids, data_start_sheet_row, next_row = get_existing_room_ids(service, profile)
     print(f'Ada {len(existing_ids)} Live Room ID yang udah ada di sheet.')
+    if existing_ids.numeric_count:
+        print(f'  PERHATIAN: {existing_ids.numeric_count} di antaranya kesimpen sebagai ANGKA '
+              '(digit belakang udah hilang) -- dicocokkan lewat 15 digit depan.')
 
     metric_target_cols = {}
     if profile['extra_metrics']:
         metric_target_cols = get_metric_target_cols(service, profile, data_start_sheet_row - 1)
         print('Kolom metrik: ' + ', '.join(f'{k}={c}' for k, c in metric_target_cols.items()))
 
-    to_insert = [r for r in records if r['room_id'] not in existing_ids]
+    to_insert = []
+    approx_matched = 0
+    for r in records:
+        m = existing_ids.match(r['room_id'])
+        if m is None:
+            to_insert.append(r)
+        elif m == 'approx':
+            approx_matched += 1
     skipped = len(records) - len(to_insert)
+    if approx_matched:
+        print(f'{approx_matched} livestream dianggap sudah ada lewat cocok 15 digit depan (ID lama berbentuk angka).')
 
     if not to_insert:
         print(f'\nTidak ada livestream baru. Semua ({len(records)}) sudah pernah diinput sebelumnya.')
@@ -574,14 +725,9 @@ def main():
 
     print(f'\n{len(to_insert)} livestream baru akan ditambahkan ke baris {next_row}-{next_row + len(to_insert) - 1}.')
     print(f'{skipped} dilewati karena sudah ada di sheet.')
+    ensure_enough_rows(service, TARGET_SPREADSHEET_ID, profile['sheet'], next_row + len(to_insert) - 1)
     print('Menulis ke Google Sheets...')
     write_new_records(service, profile, to_insert, next_row, metric_target_cols)
-
-    print('\nSinkronisasi roster creator (khusus sumber TAP)...')
-    sync_roster_from_records(
-        service, TARGET_SPREADSHEET_ID, profile['name'],
-        [(r['creator'], r['live_date']) for r in to_insert]
-    )
 
     print(f'\nSELESAI. {len(to_insert)} livestream baru ditambahkan, {skipped} dilewati (duplikat).')
 
